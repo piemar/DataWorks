@@ -13,10 +13,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if [[ -f .env ]]; then
+if [[ -f .env_local ]]; then
   # shellcheck disable=SC1091
-  source .env
-fi
+  source .env_local
+elif [[ -f config.env ]]; then
+  # shellcheck disable=SC1091
+  source config.env
 
 COSMOS_URI="${COSMOS_DB_CONNECTION_STRING:-}"
 COSMOS_DB="${COSMOS_DB_NAME:-volvo-service-orders}"

@@ -36,7 +36,7 @@ async def main():
         logger.info("You can now run the data generator or migration scripts.")
     else:
         logger.error("❌ Database connection test failed.")
-        logger.error("Please check your connection strings in the .env file.")
+        logger.error("Please check your connection strings in the .env_local file.")
     
     return success
 
