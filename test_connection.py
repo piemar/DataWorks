@@ -23,9 +23,9 @@ async def main():
     load_dotenv('.env_local')  # Try to load sensitive credentials first
     load_dotenv('config.env')  # Fallback to example values
     
-    # Check if .env file exists
-    if not os.path.exists('.env'):
-        logger.error("❌ .env file not found. Please copy config.env.example to .env and update with your connection strings.")
+    # Check if .env_local file exists
+    if not os.path.exists('.env_local'):
+        logger.error("❌ .env_local file not found. Please copy .env_local.example to .env_local and update with your connection strings.")
         return False
     
     # Test connections

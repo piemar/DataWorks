@@ -148,13 +148,7 @@ volvo-vida/
 │   ├── .env_local                # Your credentials (not tracked)
 │   ├── .env_local.example        # Template for developers
 │   ├── config.env                # Example values
-│   ├── requirements.txt          # Python dependencies
-│   └── setup.py                  # Setup script
-│
-├── 📊 Runtime Files
-│   ├── migration_checkpoint.json # Migration progress (auto-created)
-│   ├── count_cache.json         # Document count cache
-│   └── estimated_count_cache.json # Estimated count cache
+│   └── requirements.txt          # Python dependencies
 │
 └── 📚 Documentation
     └── README.md                 # This file
@@ -208,7 +202,6 @@ Both scripts provide real-time progress monitoring:
 ### Checkpoint System
 
 The migration automatically saves progress every 50,000 documents:
-- **File**: `migration_checkpoint.json`
 - **Resume**: Automatic on restart
 - **No Duplicates**: Smart resume prevents data duplication
 
