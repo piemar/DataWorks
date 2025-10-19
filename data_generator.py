@@ -46,16 +46,11 @@ class DataGenerator:
         self.cosmos_db_name = os.getenv('COSMOS_DB_NAME', 'volvo-service-orders')
         self.cosmos_collection_name = os.getenv('COSMOS_DB_COLLECTION', 'serviceorders')
         
-        self.batch_size = int(os.getenv('BATCH_SIZE', 2000))  # Optimized batch size for maximum speed
+        self.batch_size = int(os.getenv('BATCH_SIZE', 5000))  # Optimized batch size for maximum speed
         self.total_documents = int(os.getenv('TOTAL_DOCUMENTS', 10000000))
-        self.concurrent_workers = int(os.getenv('CONCURRENT_WORKERS', 12))  # More workers for maximum speed
+        self.concurrent_workers = int(os.getenv('CONCURRENT_WORKERS', 16))  # More workers for maximum speed
         
-        # Adaptive concurrency control (inspired by your Cosmos code)
-        self.max_concurrent_workers = int(os.getenv('MAX_CONCURRENT_WORKERS', 20))  # Maximum workers
-        self.min_concurrent_workers = int(os.getenv('MIN_CONCURRENT_WORKERS', 4))   # Minimum workers
-        self.throttle_threshold = 0.1  # 10% throttling threshold for scaling down
         
-        self.generator = ServiceOrderGenerator()
         self.client: Optional[AsyncIOMotorClient] = None
         self.collection = None
         self.is_running = True
@@ -65,10 +60,6 @@ class DataGenerator:
         self.start_time = None
         self.errors = 0
         
-        # Adaptive concurrency tracking
-        self.throttle_count = 0  # Count of throttling events
-        self.batch_count = 0  # Total batches processed
-        self.adaptive_stats = {'throttles': 0, 'successes': 0}
         
         # RU monitoring - correct rate calculation
         self.ru_consumed_in_window = 0  # RU consumed in current window
@@ -77,8 +68,8 @@ class DataGenerator:
         self.ru_check_interval = 10.0  # Check RU rate every 10 seconds for accuracy
         self.is_throttling = False  # Track throttling state for progress bar
         self.batch_count = 0  # Count batches for reduced monitoring
-        self.monitoring_batch_interval = 5  # Monitor every 5 batches for responsiveness
-        self.progress_update_interval = 5  # Update progress bar every 5 batches
+        self.monitoring_batch_interval = 10  # Monitor every 10 batches for responsiveness
+        self.progress_update_interval = 10  # Update progress bar every 10 batches
         self.pending_updates = 0  # Accumulate updates before showing
         
         # Setup signal handlers for graceful shutdown
@@ -101,10 +92,10 @@ class DataGenerator:
             
             # Optimize connection settings for maximum speed
             # Increase connection pool size for better concurrency
-            self.client._pool_size = 100  # More connections for concurrent operations
-            self.client._max_pool_size = 200  # Maximum pool size
-            self.client._min_pool_size = 20  # Minimum pool size
-            self.client._max_idle_time_ms = 30000  # Keep connections alive longer
+            self.client._pool_size = 200  # More connections for concurrent operations
+            self.client._max_pool_size = 400  # Maximum pool size
+            self.client._min_pool_size = 50  # Minimum pool size
+            self.client._max_idle_time_ms = 60000  # Keep connections alive longer
             
             # Test connection
             await self.client.admin.command('ping')
@@ -137,11 +128,23 @@ class DataGenerator:
         for i in range(batch_size):
             try:
                 # Generate document structure with shard key at root level
-                service_type = random.choice(['oil_change', 'brake_service', 'tire_rotation'])
+                service_type = random.choice([
+                    'oil_change', 'brake_service', 'tire_rotation', 
+                    'engine_diagnostic', 'transmission_service', 'battery_replacement',
+                    'air_filter_change', 'spark_plug_replacement', 'coolant_flush',
+                    'power_steering_service', 'suspension_check', 'exhaust_system_repair',
+                    'clutch_service', 'timing_belt_replacement', 'fuel_system_clean',
+                    'ac_service', 'heater_repair', 'electrical_diagnostic',
+                    'body_work', 'paint_job', 'windshield_replacement',
+                    'headlight_replacement', 'taillight_repair', 'mirror_adjustment',
+                    'seat_reupholstery', 'interior_cleaning', 'carpet_replacement',
+                    'door_handle_repair', 'window_regulator', 'lock_mechanism_service'
+                ])
                 
                 order_dict = {
                     '_id': ObjectId(),
                     'service_type': service_type,  # SHARD KEY - must be at root level
+                    'service_center_id': f"CENTER_{random.randint(1, 50)}",  # Additional partition distribution
                     'order_id': f"SO_{random.randint(1000000000, 9999999999)}",
                     'customer': {
                         'customer_id': f"CUST_{random.randint(10000000, 99999999)}",
@@ -176,7 +179,6 @@ class DataGenerator:
                     'parts_cost': round(random.uniform(50.0, 1200.0), 2),
                     'tax_amount': round(random.uniform(10.0, 200.0), 2),
                     'technician_id': f"TECH_{random.randint(1000, 9999)}",
-                    'service_center_id': f"CENTER_{random.randint(1, 50)}",
                     'warranty_info': {
                         'covered': random.choice([True, False]),
                         'warranty_type': random.choice(['manufacturer', 'extended', 'none'])
@@ -239,12 +241,12 @@ class DataGenerator:
                         self.last_ru_check = current_time
                         self.ru_consumed_in_window = 0
                         
-                        # Throttle if consuming too many RU (for 30K RU provisioned)
-                        if self.ru_per_second > 28000:  # 93% of 30K RU limit for safety
+                        # Throttle if consuming too many RU (for 40K RU provisioned)
+                        if self.ru_per_second > 36000:  # 90% of 40K RU limit for safety
                             self.is_throttling = True
                             # Proportional throttling: more aggressive for higher RU consumption
-                            excess_ru = self.ru_per_second - 28000
-                            throttle_time = (excess_ru / 28000) * 0.1  # Up to 0.1s throttle
+                            excess_ru = self.ru_per_second - 36000
+                            throttle_time = (excess_ru / 36000) * 0.1  # Up to 0.1s throttle
                             await asyncio.sleep(throttle_time)
                         else:
                             self.is_throttling = False
@@ -262,8 +264,6 @@ class DataGenerator:
                 
                 # Handle 429 throttling errors with exponential backoff
                 if "429" in error_str or "throttle" in error_str or "rate limit" in error_str:
-                    self.throttle_count += 1
-                    self.adaptive_stats['throttles'] += 1
                     if attempt < max_retries:
                         backoff_time = (2 ** attempt) * 0.1  # Exponential backoff: 0.1s, 0.2s, 0.4s
                         logger.warning(f"Throttled (attempt {attempt + 1}/{max_retries + 1}), retrying in {backoff_time:.1f}s...")
@@ -284,6 +284,8 @@ class DataGenerator:
     async def generate_and_write_continuously(self):
         """Optimized parallel data generation with efficient task management"""
         logger.info(f"🚀 Starting OPTIMIZED parallel data generation...")
+        logger.info(f"Database: {self.cosmos_db_name}")
+        logger.info(f"Collection: {self.cosmos_collection_name}")
         logger.info(f"Target: {self.total_documents:,} documents")
         logger.info(f"Batch size: {self.batch_size}")
         logger.info(f"Concurrent workers: {self.concurrent_workers}")
@@ -293,7 +295,7 @@ class DataGenerator:
         # Create progress bar with RU consumption display
         pbar = tqdm(
             total=self.total_documents, 
-            desc="🚀 Optimized Generation", 
+            desc=f"🚀 Generating to {self.cosmos_db_name}.{self.cosmos_collection_name}", 
             unit="docs",
             unit_scale=True,
             ncols=120,
@@ -310,21 +312,6 @@ class DataGenerator:
                 """Worker function with semaphore control"""
                 async with semaphore:
                     result = await self.generate_and_write_batch(batch_size)
-                    
-                    # Adaptive concurrency control (inspired by your Cosmos code)
-                    if result > 0:
-                        self.adaptive_stats['successes'] += 1
-                    
-                    # Scale down if too much throttling
-                    throttle_rate = self.adaptive_stats['throttles'] / max(self.batch_count, 1)
-                    if throttle_rate > self.throttle_threshold and semaphore._value > self.min_concurrent_workers:
-                        semaphore._value -= 1
-                        logger.info(f"🔻 Scaling down concurrency to {semaphore._value} workers (throttle rate: {throttle_rate:.2%})")
-                    # Scale up if no throttling
-                    elif throttle_rate == 0 and semaphore._value < self.max_concurrent_workers:
-                        semaphore._value += 1
-                        logger.info(f"🔺 Scaling up concurrency to {semaphore._value} workers")
-                    
                     return result
             
             # Create all tasks upfront for better efficiency
@@ -392,6 +379,8 @@ class DataGenerator:
         
         logger.info(f"🎉 Data generation completed!")
         logger.info(f"📊 Performance Summary:")
+        logger.info(f"   • Database: {self.cosmos_db_name}")
+        logger.info(f"   • Collection: {self.cosmos_collection_name}")
         logger.info(f"   • Documents written: {self.documents_written:,}")
         logger.info(f"   • Total time: {elapsed:.2f} seconds")
         logger.info(f"   • Average rate: {rate:.0f} documents/second")
@@ -400,7 +389,7 @@ class DataGenerator:
         logger.info(f"   • Total RU consumed: {total_ru_consumed:.0f} RU")
         logger.info(f"   • Data size: {estimated_size_gb:.2f} GB")
         logger.info(f"   • Errors: {self.errors}")
-        logger.info(f"   • Throttling threshold: 28,000 RU/sec (93% of 30K limit)")
+        logger.info(f"   • Throttling threshold: 36,000 RU/sec (90% of 40K limit)")
 
     async def generate_specific_amount(self, target_documents: int):
         """Generate a specific amount of data and stop"""

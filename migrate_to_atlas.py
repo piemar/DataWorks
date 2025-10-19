@@ -54,8 +54,8 @@ class CosmosToAtlasMigrator:
         self.atlas_collection_name = os.getenv('MONGODB_ATLAS_COLLECTION', 'serviceorders')
         
         # Migration settings (MAXIMUM SPEED OPTIMIZED)
-        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 2000))  # Match data generator batch size
-        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 12))  # Match data generator workers
+        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 5000))  # Match data generator batch size
+        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 16))  # Match data generator workers
         
         # Adaptive concurrency control (inspired by your Cosmos code)
         self.max_concurrent_workers = int(os.getenv('MAX_CONCURRENT_WORKERS', 20))  # Maximum workers
@@ -123,41 +123,6 @@ class CosmosToAtlasMigrator:
         self.is_running = False
         self._save_checkpoint()
 
-    async def _exponential_backoff(self, attempt: int) -> float:
-        """Calculate exponential backoff delay with jitter"""
-        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
-        jitter = random.uniform(0, delay * 0.1)  # Add 10% jitter
-        return delay + jitter
-
-    def _is_circuit_open(self) -> bool:
-        """Check if circuit breaker is open"""
-        if not self.circuit_open:
-            return False
-        
-        # Check if timeout has passed
-        if time.time() - self.last_failure_time > self.circuit_breaker_timeout:
-            logger.info("Circuit breaker timeout expired, attempting to close circuit")
-            self.circuit_open = False
-            self.failure_count = 0
-            return False
-        
-        return True
-
-    def _record_success(self):
-        """Record successful operation"""
-        self.failure_count = 0
-        if self.circuit_open:
-            logger.info("Circuit breaker closed due to successful operation")
-            self.circuit_open = False
-
-    def _record_failure(self):
-        """Record failed operation"""
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-        
-        if self.failure_count >= self.circuit_breaker_threshold:
-            logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
-            self.circuit_open = True
 
     async def _retry_with_backoff(self, func, *args, **kwargs):
         """Ultra-fast retry with minimal overhead"""
@@ -196,10 +161,10 @@ class CosmosToAtlasMigrator:
             self.atlas_client = atlas_compatible.create_client(async_client=True)
             
             # Optimize Atlas connection pool for maximum speed
-            self.atlas_client._pool_size = 100  # More connections for concurrent operations
-            self.atlas_client._max_pool_size = 200  # Maximum pool size
-            self.atlas_client._min_pool_size = 20  # Minimum pool size
-            self.atlas_client._max_idle_time_ms = 30000  # Keep connections alive longer
+            self.atlas_client._pool_size = 200  # More connections for concurrent operations
+            self.atlas_client._max_pool_size = 400  # Maximum pool size
+            self.atlas_client._min_pool_size = 50  # Minimum pool size
+            self.atlas_client._max_idle_time_ms = 60000  # Keep connections alive longer
             
             await self.atlas_client.admin.command('ping')
             
@@ -359,9 +324,26 @@ class CosmosToAtlasMigrator:
                         cache_time = cache_data.get('timestamp', 0)
                         cache_query = cache_data.get('query', {})
                         
+                        # Convert current query to serializable format for comparison
+                        serializable_query = {}
+                        if query:
+                            for key, value in query.items():
+                                if isinstance(value, dict):
+                                    serializable_query[key] = {}
+                                    for sub_key, sub_value in value.items():
+                                        if hasattr(sub_value, '__str__'):
+                                            serializable_query[key][sub_key] = str(sub_value)
+                                        else:
+                                            serializable_query[key][sub_key] = sub_value
+                                else:
+                                    if hasattr(value, '__str__'):
+                                        serializable_query[key] = str(value)
+                                    else:
+                                        serializable_query[key] = value
+                        
                         # Use cache if it's less than 1 hour old and query matches
                         if (time.time() - cache_time < 3600 and 
-                            cache_query == query):
+                            cache_query == serializable_query):
                             logger.info(f"Using cached count: {cached_count:,}")
                             return cached_count
                         else:
@@ -379,10 +361,27 @@ class CosmosToAtlasMigrator:
                 
                 # Cache the result
                 try:
+                    # Convert ObjectId to string for JSON serialization
+                    serializable_query = {}
+                    if query:
+                        for key, value in query.items():
+                            if isinstance(value, dict):
+                                serializable_query[key] = {}
+                                for sub_key, sub_value in value.items():
+                                    if hasattr(sub_value, '__str__'):
+                                        serializable_query[key][sub_key] = str(sub_value)
+                                    else:
+                                        serializable_query[key][sub_key] = sub_value
+                            else:
+                                if hasattr(value, '__str__'):
+                                    serializable_query[key] = str(value)
+                                else:
+                                    serializable_query[key] = value
+                    
                     cache_data = {
                         'count': total_count,
                         'timestamp': time.time(),
-                        'query': query
+                        'query': serializable_query
                     }
                     with open(cache_file, 'w') as f:
                         json.dump(cache_data, f)
@@ -447,8 +446,8 @@ class CosmosToAtlasMigrator:
                     'timestamp': time.time()
                 })
                 
-                # Auto-tune batch size every 10 batches
-                if len(self.batch_performance_history) >= 10:
+                # Auto-tune batch size every 20 batches for better performance
+                if len(self.batch_performance_history) >= 20:
                     self._auto_tune_batch_size()
                 
         except Exception as e:
@@ -564,6 +563,10 @@ class CosmosToAtlasMigrator:
     async def migrate_with_parallel_processing(self, resume_from_id: Optional[str] = None):
         """Ultra-fast migration using cursor-based parallel processing"""
         logger.info("🚀 Starting ULTRA-FAST cursor-based migration...")
+        logger.info(f"Source Database: {self.cosmos_db_name}")
+        logger.info(f"Source Collection: {self.cosmos_collection_name}")
+        logger.info(f"Target Database: {self.atlas_db_name}")
+        logger.info(f"Target Collection: {self.atlas_collection_name}")
         
         # Build query for resuming
         query = {}
@@ -611,7 +614,7 @@ class CosmosToAtlasMigrator:
             # For fresh migration
             total_with_migrated = total_count
             initial_n = 0
-            desc = "🚀 Migration Progress"
+            desc = f"🚀 Migration: {self.cosmos_db_name}.{self.cosmos_collection_name} → {self.atlas_db_name}.{self.atlas_collection_name}"
             
         pbar = tqdm(
             total=total_with_migrated,
@@ -675,8 +678,8 @@ class CosmosToAtlasMigrator:
                         # Remove completed tasks
                         pending_tasks = pending_tasks[self.max_workers//2:]
                     
-                    # Save checkpoint every 3 batches for better visibility
-                    if current_batch_number % 3 == 0:
+                    # Save checkpoint every 10 batches for better performance
+                    if current_batch_number % 10 == 0:
                         self.last_checkpoint = str(batch[-1]['_id'])
                         self._save_checkpoint(pbar)
                     
@@ -769,11 +772,16 @@ class CosmosToAtlasMigrator:
             rate = self.documents_migrated / elapsed if elapsed > 0 else 0
             
             logger.info("🚀 Migration completed!")
-            logger.info(f"📊 Total documents migrated: {self.documents_migrated:,}")
-            logger.info(f"⏭️ Total documents skipped: {self.documents_skipped:,}")
-            logger.info(f"❌ Total errors: {self.errors}")
-            logger.info(f"⏱️ Total time: {elapsed:.2f} seconds")
-            logger.info(f"📈 Average rate: {rate:.0f} documents/second")
+            logger.info(f"📊 Migration Summary:")
+            logger.info(f"   • Source Database: {self.cosmos_db_name}")
+            logger.info(f"   • Source Collection: {self.cosmos_collection_name}")
+            logger.info(f"   • Target Database: {self.atlas_db_name}")
+            logger.info(f"   • Target Collection: {self.atlas_collection_name}")
+            logger.info(f"   • Total documents migrated: {self.documents_migrated:,}")
+            logger.info(f"   • Total documents skipped: {self.documents_skipped:,}")
+            logger.info(f"   • Total errors: {self.errors}")
+            logger.info(f"   • Total time: {elapsed:.2f} seconds")
+            logger.info(f"   • Average rate: {rate:.0f} documents/second")
             
             # Enhanced metrics
             logger.info("🔧 Performance Metrics:")
