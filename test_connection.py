@@ -19,8 +19,9 @@ async def main():
     """Test database connections"""
     logger.info("Testing database connections with compatibility layer...")
     
-    # Load environment variables
-    load_dotenv()
+    # Load environment variables from .env_local (sensitive) or config.env (examples)
+    load_dotenv('.env_local')  # Try to load sensitive credentials first
+    load_dotenv('config.env')  # Fallback to example values
     
     # Check if .env file exists
     if not os.path.exists('.env'):

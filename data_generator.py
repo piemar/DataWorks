@@ -21,8 +21,9 @@ import json
 from models import ServiceOrderGenerator, ServiceOrder
 from mongodb_compatibility import create_compatible_cosmos_client
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env_local (sensitive) or config.env (examples)
+load_dotenv('.env_local')  # Try to load sensitive credentials first
+load_dotenv('config.env')  # Fallback to example values
 
 # Configure logging
 logging.basicConfig(

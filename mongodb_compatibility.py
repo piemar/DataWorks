@@ -98,7 +98,8 @@ def create_compatible_atlas_client(connection_string: str, **kwargs):
 async def test_database_connections():
     """Test both database connections with compatibility"""
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv('.env_local')  # Try to load sensitive credentials first
+    load_dotenv('config.env')  # Fallback to example values
     
     cosmos_conn_str = os.getenv('COSMOS_DB_CONNECTION_STRING')
     atlas_conn_str = os.getenv('MONGODB_ATLAS_CONNECTION_STRING')

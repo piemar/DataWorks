@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 class IndexExtractor:
     def __init__(self):
-        load_dotenv()
+        load_dotenv('.env_local')  # Try to load sensitive credentials first
+        load_dotenv('config.env')  # Fallback to example values
         
         # Connection string
         self.cosmos_connection_string = os.getenv('COSMOS_DB_CONNECTION_STRING')

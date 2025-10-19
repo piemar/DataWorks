@@ -12,8 +12,9 @@ import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env_local (sensitive) or config.env (examples)
+load_dotenv('.env_local')  # Try to load sensitive credentials first
+load_dotenv('config.env')  # Fallback to example values
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
