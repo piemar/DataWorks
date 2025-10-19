@@ -1,8 +1,11 @@
 """
 Volvo Service Orders Data Generator
 Generates and continuously writes service order data to Azure Cosmos DB
+Optimized for maximum speed with UVLoop and advanced concurrency
 """
 import asyncio
+import uvloop
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 import os
 import time
 from datetime import datetime
@@ -48,6 +51,11 @@ class DataGenerator:
         self.total_documents = int(os.getenv('TOTAL_DOCUMENTS', 10000000))
         self.concurrent_workers = int(os.getenv('CONCURRENT_WORKERS', 12))  # More workers for maximum speed
         
+        # Adaptive concurrency control (inspired by your Cosmos code)
+        self.max_concurrent_workers = int(os.getenv('MAX_CONCURRENT_WORKERS', 20))  # Maximum workers
+        self.min_concurrent_workers = int(os.getenv('MIN_CONCURRENT_WORKERS', 4))   # Minimum workers
+        self.throttle_threshold = 0.1  # 10% throttling threshold for scaling down
+        
         self.generator = ServiceOrderGenerator()
         self.client: Optional[AsyncIOMotorClient] = None
         self.collection = None
@@ -57,6 +65,11 @@ class DataGenerator:
         self.documents_written = 0
         self.start_time = None
         self.errors = 0
+        
+        # Adaptive concurrency tracking
+        self.throttle_count = 0  # Count of throttling events
+        self.batch_count = 0  # Total batches processed
+        self.adaptive_stats = {'throttles': 0, 'successes': 0}
         
         # RU monitoring - correct rate calculation
         self.ru_consumed_in_window = 0  # RU consumed in current window
@@ -250,6 +263,8 @@ class DataGenerator:
                 
                 # Handle 429 throttling errors with exponential backoff
                 if "429" in error_str or "throttle" in error_str or "rate limit" in error_str:
+                    self.throttle_count += 1
+                    self.adaptive_stats['throttles'] += 1
                     if attempt < max_retries:
                         backoff_time = (2 ** attempt) * 0.1  # Exponential backoff: 0.1s, 0.2s, 0.4s
                         logger.warning(f"Throttled (attempt {attempt + 1}/{max_retries + 1}), retrying in {backoff_time:.1f}s...")
@@ -295,7 +310,23 @@ class DataGenerator:
             async def limited_batch_worker(batch_size: int) -> int:
                 """Worker function with semaphore control"""
                 async with semaphore:
-                    return await self.generate_and_write_batch(batch_size)
+                    result = await self.generate_and_write_batch(batch_size)
+                    
+                    # Adaptive concurrency control (inspired by your Cosmos code)
+                    if result > 0:
+                        self.adaptive_stats['successes'] += 1
+                    
+                    # Scale down if too much throttling
+                    throttle_rate = self.adaptive_stats['throttles'] / max(self.batch_count, 1)
+                    if throttle_rate > self.throttle_threshold and semaphore._value > self.min_concurrent_workers:
+                        semaphore._value -= 1
+                        logger.info(f"🔻 Scaling down concurrency to {semaphore._value} workers (throttle rate: {throttle_rate:.2%})")
+                    # Scale up if no throttling
+                    elif throttle_rate == 0 and semaphore._value < self.max_concurrent_workers:
+                        semaphore._value += 1
+                        logger.info(f"🔺 Scaling up concurrency to {semaphore._value} workers")
+                    
+                    return result
             
             # Create all tasks upfront for better efficiency
             tasks = []

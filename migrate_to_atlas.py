@@ -1,8 +1,10 @@
 """
 Migration script from Azure Cosmos DB RU MongoDB API to MongoDB Atlas
-Optimized for large datasets (100GB+) with parallel processing and resumability
+Optimized for large datasets (100GB+) with UVLoop and advanced concurrency
 """
 import asyncio
+import uvloop
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 import os
 import time
 import json
@@ -55,6 +57,11 @@ class CosmosToAtlasMigrator:
         # Migration settings (MAXIMUM SPEED OPTIMIZED)
         self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 2000))  # Match data generator batch size
         self.max_workers = int(os.getenv('MIGRATION_WORKERS', 12))  # Match data generator workers
+        
+        # Adaptive concurrency control (inspired by your Cosmos code)
+        self.max_concurrent_workers = int(os.getenv('MAX_CONCURRENT_WORKERS', 20))  # Maximum workers
+        self.min_concurrent_workers = int(os.getenv('MIN_CONCURRENT_WORKERS', 4))   # Minimum workers
+        self.throttle_threshold = 0.1  # 10% throttling threshold for scaling down
         self.resume_from_checkpoint = os.getenv('RESUME_FROM_CHECKPOINT', 'true').lower() == 'true'
         self.checkpoint_file = 'migration_checkpoint.json'
         
@@ -73,6 +80,11 @@ class CosmosToAtlasMigrator:
         
         # Control flags
         self.is_running = True
+        
+        # Adaptive concurrency tracking
+        self.throttle_count = 0  # Count of throttling events
+        self.batch_count = 0  # Total batches processed
+        self.adaptive_stats = {'throttles': 0, 'successes': 0}
         
 
         # Simplified retry settings for maximum speed
