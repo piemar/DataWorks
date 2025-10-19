@@ -52,9 +52,9 @@ class CosmosToAtlasMigrator:
         self.atlas_db_name = os.getenv('MONGODB_ATLAS_DB_NAME', 'volvo-service-orders')
         self.atlas_collection_name = os.getenv('MONGODB_ATLAS_COLLECTION', 'serviceorders')
         
-        # Migration settings (Phase 1 Optimized)
-        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 5000))  # Ultra-large batches
-        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 10))  # High concurrency
+        # Migration settings (MAXIMUM SPEED OPTIMIZED)
+        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 2000))  # Match data generator batch size
+        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 12))  # Match data generator workers
         self.resume_from_checkpoint = os.getenv('RESUME_FROM_CHECKPOINT', 'true').lower() == 'true'
         self.checkpoint_file = 'migration_checkpoint.json'
         
@@ -75,15 +75,8 @@ class CosmosToAtlasMigrator:
         self.is_running = True
         
 
-        # Circuit breaker and retry settings (M40 optimized)
-        self.max_retries = 5
-        self.base_delay = 2.0
-        self.max_delay = 30.0
-        self.circuit_breaker_threshold = 8
-        self.circuit_breaker_timeout = 180  # 3 minutes
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.circuit_open = False
+        # Simplified retry settings for maximum speed
+        self.max_retries = 2  # Minimal retries for speed
         
         # Performance metrics
         self.metrics = {
@@ -156,27 +149,18 @@ class CosmosToAtlasMigrator:
             self.circuit_open = True
 
     async def _retry_with_backoff(self, func, *args, **kwargs):
-        """Execute function with exponential backoff retry"""
-        for attempt in range(self.max_retries + 1):
+        """Ultra-fast retry with minimal overhead"""
+        for attempt in range(2):  # Reduced to 2 attempts for speed
             try:
-                if self._is_circuit_open():
-                    raise Exception("Circuit breaker is open")
-                
                 result = await func(*args, **kwargs)
-                self._record_success()
                 return result
                 
             except Exception as e:
-                self._record_failure()
-                self.metrics['total_retries'] += 1
-                
-                if attempt == self.max_retries:
-                    logger.error(f"Max retries exceeded for {func.__name__}: {e}")
+                if attempt == 1:  # Last attempt
                     raise
                 
-                delay = await self._exponential_backoff(attempt)
-                logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {e}. Retrying in {delay:.2f}s")
-                await asyncio.sleep(delay)
+                # Minimal delay for speed
+                await asyncio.sleep(0.1)
 
     async def connect_to_databases(self):
         """Connect to both source and target databases with optimized settings"""
@@ -199,15 +183,22 @@ class CosmosToAtlasMigrator:
             
             # Create client with compatibility layer (no custom options)
             self.atlas_client = atlas_compatible.create_client(async_client=True)
+            
+            # Optimize Atlas connection pool for maximum speed
+            self.atlas_client._pool_size = 100  # More connections for concurrent operations
+            self.atlas_client._max_pool_size = 200  # Maximum pool size
+            self.atlas_client._min_pool_size = 20  # Minimum pool size
+            self.atlas_client._max_idle_time_ms = 30000  # Keep connections alive longer
+            
             await self.atlas_client.admin.command('ping')
             
             atlas_db = self.atlas_client[self.atlas_db_name]
             
-            # Set fast write concern for migration (w:1, j:false)
+            # Set unacknowledged write concern for maximum speed (fire and forget)
             from pymongo.write_concern import WriteConcern
             self.atlas_collection = atlas_db.get_collection(
                 self.atlas_collection_name, 
-                write_concern=WriteConcern(w=0, j=False)
+                write_concern=WriteConcern(w=0)  # Unacknowledged writes for maximum speed
             )
             logger.info("Connected to MongoDB Atlas successfully")
             
@@ -221,12 +212,12 @@ class CosmosToAtlasMigrator:
                 logger.error(f"Atlas connection test failed: {e}")
                 return False
             
-            # Log optimization settings that are still active
-            logger.info("🚀 Optimization settings active:")
+            logger.info("🚀 MAXIMUM SPEED optimization settings active:")
             logger.info(f"   📦 Batch size: {self.batch_size:,} documents")
             logger.info(f"   🔧 Concurrent workers: {self.max_workers}")
-            logger.info(f"   🔄 Retry logic: {self.max_retries} attempts with exponential backoff")
-            logger.info(f"   🛡️ Circuit breaker: Opens after {self.circuit_breaker_threshold} failures")
+            logger.info(f"   🔄 Retry logic: {self.max_retries} attempts with minimal delay")
+            logger.info(f"   ⚡ Write concern: Unacknowledged (w=0)")
+            logger.info(f"   🚀 Connection pool: 100-200 connections")
             
             return True
             
@@ -407,42 +398,24 @@ class CosmosToAtlasMigrator:
                 
             logger.debug(f"Processing batch of {len(batch)} documents")
             
-            # No individual batch progress bar - cleaner output
-            
-            # Fast document preparation - minimal processing
-            documents_to_insert = []
-            processed_count = 0
-            for doc in batch:
-                processed_count += 1
-                try:
-                    # Keep original _id as ObjectId (don't convert to string)
-                    # Atlas can handle ObjectId directly
-                    documents_to_insert.append(doc)
-                    
-                except Exception as e:
-                    logger.error(f"Error preparing document {processed_count}: {e}")
-                    stats['errors'] += 1
-                
-                # No progress bar updates for cleaner output
-            
-            logger.debug(f"Prepared {len(documents_to_insert)} documents for insertion")
-            
-            if documents_to_insert:
-                # Use simple insert_many with duplicate handling
+            # DIRECT INSERT - No processing overhead (maximum speed)
+            if batch:
+                # Ultra-fast direct insert with minimal error handling
                 async def _insert_batch():
                     try:
                         result = await self.atlas_collection.insert_many(
-                            documents_to_insert, 
+                            batch,  # Direct insert without processing
                             ordered=False  # Continue on errors for speed
                         )
                         stats['migrated'] = len(result.inserted_ids)
                         return result
                         
                     except Exception as e:
-                        # Handle duplicate key errors gracefully
-                        if "duplicate key" in str(e).lower() or "e11000" in str(e).lower():
-                            logger.debug(f"Duplicate key error in batch {batch_number}: {e}")
-                            stats['skipped'] = len(documents_to_insert)
+                        # Minimal error handling for speed - only handle critical errors
+                        error_str = str(e).lower()
+                        if "duplicate key" in error_str or "e11000" in error_str:
+                            # Skip duplicates silently for speed
+                            stats['skipped'] = len(batch)
                             class DuplicateResult:
                                 inserted_ids = []
                             return DuplicateResult()
@@ -451,7 +424,6 @@ class CosmosToAtlasMigrator:
                             raise e
                 
                 result = await self._retry_with_backoff(_insert_batch)
-                # Stats are already set in _insert_batch function
                 self.metrics['successful_batches'] += 1
                 # No batch logging for cleaner console output
                 
@@ -799,7 +771,6 @@ class CosmosToAtlasMigrator:
             logger.info(f"   ❌ Failed batches: {self.metrics['failed_batches']:,}")
             logger.info(f"   🔄 Total retries: {self.metrics['total_retries']:,}")
             logger.info(f"   📊 Success rate: {(self.metrics['successful_batches'] / max(self.metrics['total_batches'], 1)) * 100:.1f}%")
-            logger.info(f"   🔧 Circuit breaker failures: {self.failure_count}")
             
             # Performance analysis
             if self.metrics['total_batches'] > 0:
