@@ -260,6 +260,7 @@ $RECYCLE.BIN/
 config.env
 *.env
 .env.local
+.env_local
 .env.production
 .env.staging
 
