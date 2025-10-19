@@ -1,7 +1,0 @@
-{
-  "documents_migrated": 3789185,
-  "documents_skipped": 606768,
-  "errors": 130000,
-  "last_checkpoint": "2025-10-19T18:58:38.228161",
-  "last_document_id": "68f4f9632105e41a636000e5"
-}
