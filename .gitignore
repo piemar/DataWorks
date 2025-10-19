@@ -316,6 +316,10 @@ data_generator.log
 count_cache.json
 estimated_count_cache.json
 
+# Development files
+setup.py
+quick_start.sh
+
 # Performance monitoring files
 *.prof
 *.profile
