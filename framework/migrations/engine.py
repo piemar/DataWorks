@@ -236,14 +236,14 @@ class MigrationEngine:
             migrated_so_far = 0
         self.migration_strategy.documents_migrated = migrated_so_far
         
-        # Create progress bar
+        # Create progress bar with custom rate formatting
         pbar = tqdm(
             total=total_docs,
             desc="🚀 Migrating data",
             unit="docs",
             unit_scale=True,
             ncols=120,
-            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}',
+            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, Rate: {rate_fmt}] {postfix}',
             colour='blue',
             smoothing=self.config.performance.progress_smoothing,
             miniters=self.config.performance.progress_miniters,
