@@ -55,25 +55,37 @@ nano .env_local
 
 **Required Configuration:**
 ```env
-# Azure Cosmos DB Configuration
-COSMOS_DB_CONNECTION_STRING="mongodb://your-account:YOUR_PASSWORD@your-account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@your-account@"
-COSMOS_DB_NAME=volvo-service-orders
-COSMOS_DB_COLLECTION=serviceorders
+# Database Configuration (GEN_ prefix for source, MIG_ prefix for target)
+GEN_DB_CONNECTION_STRING="mongodb://your-account:YOUR_PASSWORD@your-account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@your-account@"
+GEN_DB_NAME=volvo-service-orders
+GEN_DB_COLLECTION=serviceorders
+GEN_CURSOR_BATCH_SIZE=10000
 
-# MongoDB Atlas Configuration
-MONGODB_ATLAS_CONNECTION_STRING="mongodb+srv://your-username:YOUR_PASSWORD@your-cluster.mongodb.net/?retryWrites=false&w=majority&appName=YourCluster"
-MONGODB_ATLAS_DB_NAME=volvo-service-orders
-MONGODB_ATLAS_COLLECTION=serviceorders
+MIG_TARGET_DB_CONNECTION_STRING="mongodb+srv://your-username:YOUR_PASSWORD@your-cluster.mongodb.net/?retryWrites=false&w=0&appName=YourCluster"
+MIG_TARGET_DB_NAME=volvo-service-orders
+MIG_TARGET_DB_COLLECTION=serviceorders
 
-# Data Generation Settings (OPTIMIZED for MAXIMUM SPEED)
-BATCH_SIZE=2000
-TOTAL_DOCUMENTS=61000000
-CONCURRENT_WORKERS=12
+# Data Generation Settings (GEN_ prefix)
+GEN_BATCH_SIZE=40000
+GEN_TOTAL_DOCUMENTS=22000000
+GEN_WORKERS=8
+GEN_WRITE_WORKERS=16
+GEN_MAX_WORKERS=12
+GEN_MIN_WORKERS=4
+GEN_MAX_WRITE_WORKERS=24
+GEN_MIN_WRITE_WORKERS=8
 
-# Migration Settings (MAXIMUM SPEED OPTIMIZED)
-MIGRATION_BATCH_SIZE=4000
-MIGRATION_WORKERS=12
-RESUME_FROM_CHECKPOINT=true
+# Migration Settings (MIG_ prefix)
+MIG_BATCH_SIZE=50000
+MIG_WORKERS=20
+MIG_MAX_WORKERS=30
+MIG_MIN_WORKERS=4
+MIG_PARALLEL_CURSORS=15
+MIG_RESUME_FROM_CHECKPOINT=false
+MIG_MAX_INSERT_WORKERS=50
+MIG_READ_AHEAD_BATCHES=15000
+MIG_READ_AHEAD_WORKERS=1
+MIG_MAX_CONCURRENT_BATCHES=30
 ```
 
 ### 3. Test Connection
@@ -161,11 +173,11 @@ volvo-vida/
 ### Data Generation
 
 ```bash
-# Generate 61M documents (current setting)
+# Generate documents using GEN_TOTAL_DOCUMENTS setting
 python data_generator.py
 
 # Generate specific amount
-export TOTAL_DOCUMENTS=1000000
+export GEN_TOTAL_DOCUMENTS=1000000
 python data_generator.py
 ```
 
@@ -246,12 +258,12 @@ from dotenv import load_dotenv
 load_dotenv('.env_local')
 
 # Cosmos DB count
-cosmos_client = MongoClient(os.getenv('COSMOS_DB_CONNECTION_STRING'))
-cosmos_count = cosmos_client[os.getenv('COSMOS_DB_NAME')][os.getenv('COSMOS_DB_COLLECTION')].count_documents({})
+cosmos_client = MongoClient(os.getenv('GEN_DB_CONNECTION_STRING'))
+cosmos_count = cosmos_client[os.getenv('GEN_DB_NAME')][os.getenv('GEN_DB_COLLECTION')].estimated_document_count()
 
 # Atlas count
-atlas_client = MongoClient(os.getenv('MONGODB_ATLAS_CONNECTION_STRING'))
-atlas_count = atlas_client[os.getenv('MONGODB_ATLAS_DB_NAME')][os.getenv('MONGODB_ATLAS_COLLECTION')].count_documents({})
+atlas_client = MongoClient(os.getenv('MIG_TARGET_DB_CONNECTION_STRING'))
+atlas_count = atlas_client[os.getenv('MIG_TARGET_DB_NAME')][os.getenv('MIG_TARGET_DB_COLLECTION')].estimated_document_count()
 
 print(f"Cosmos DB: {cosmos_count:,} documents")
 print(f"MongoDB Atlas: {atlas_count:,} documents")

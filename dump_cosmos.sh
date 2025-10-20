@@ -20,9 +20,9 @@ elif [[ -f config.env ]]; then
   # shellcheck disable=SC1091
   source config.env
 
-COSMOS_URI="${COSMOS_DB_CONNECTION_STRING:-}"
-COSMOS_DB="${COSMOS_DB_NAME:-volvo-service-orders}"
-COSMOS_COLL="${COSMOS_DB_COLLECTION:-}"
+COSMOS_URI="${GEN_DB_CONNECTION_STRING:-}"
+COSMOS_DB="${GEN_DB_NAME:-volvo-service-orders}"
+COSMOS_COLL="${GEN_DB_COLLECTION:-}"
 
 if ! command -v mongodump >/dev/null 2>&1; then
   echo "ERROR: mongodump not found. Install MongoDB Database Tools: https://www.mongodb.com/try/download/database-tools" >&2
@@ -30,7 +30,7 @@ if ! command -v mongodump >/dev/null 2>&1; then
 fi
 
 if [[ -z "$COSMOS_URI" ]]; then
-  echo "ERROR: COSMOS_DB_CONNECTION_STRING not set (in config.env)." >&2
+  echo "ERROR: GEN_DB_CONNECTION_STRING not set (in .env)." >&2
   exit 1
 fi
 

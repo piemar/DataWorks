@@ -4,13 +4,17 @@ Generates and continuously writes service order data to Azure Cosmos DB
 Optimized for maximum speed with UVLoop and advanced concurrency
 """
 import asyncio
-import uvloop
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 import os
 import time
 from datetime import datetime
 from typing import List, Optional
 import logging
+
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+except ImportError:
+    pass  # uvloop not available, using default event loop
 from concurrent.futures import ThreadPoolExecutor
 import signal
 import sys
@@ -39,24 +43,128 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class DataGenerator:
-    """Main data generator class for creating and writing service orders"""
+    """
+    High-performance data generator for Volvo service orders.
+    
+    This class generates realistic Volvo service order data and writes it to Azure Cosmos DB
+    using parallel processing, batch aggregation, and optimized connection pooling for
+    maximum throughput.
+    
+    Features:
+    - Parallel write workers with batch aggregation
+    - Bulk write operations for maximum efficiency
+    - RU consumption monitoring and throttling
+    - Adaptive concurrency control
+    - Real-time progress tracking
+    - Configurable via environment variables (GEN_ prefix)
+    
+    Environment Variables:
+    - GEN_DB_CONNECTION_STRING: Cosmos DB connection string
+    - GEN_DB_NAME: Database name (default: volvo-service-orders)
+    - GEN_DB_COLLECTION: Collection name (default: serviceorders)
+    - GEN_BATCH_SIZE: Batch size for generation (default: 5000)
+    - GEN_TOTAL_DOCUMENTS: Total documents to generate (default: 10000000)
+    - GEN_WORKERS: Number of generation workers (default: 8)
+    - GEN_WRITE_WORKERS: Number of write workers (default: 16)
+    - GEN_MAX_WORKERS: Maximum workers for adaptive scaling (default: 12)
+    - GEN_MIN_WORKERS: Minimum workers for adaptive scaling (default: 4)
+    - GEN_MAX_WRITE_WORKERS: Maximum write workers (default: 24)
+    - GEN_MIN_WRITE_WORKERS: Minimum write workers (default: 8)
+    - GEN_POOL_SIZE: Connection pool size (default: 400)
+    - GEN_MAX_POOL_SIZE: Maximum pool size (default: 600)
+    - GEN_MIN_POOL_SIZE: Minimum pool size (default: 100)
+    - GEN_MAX_IDLE_TIME_MS: Max idle time in ms (default: 300000)
+    - GEN_WARMUP_CONNECTIONS: Connections to pre-warm (default: 30)
+    - GEN_QUEUE_MULTIPLIER: Generation queue multiplier (default: 10)
+    - GEN_WRITE_QUEUE_MULTIPLIER: Write queue multiplier (default: 10)
+    - GEN_BATCH_AGGREGATION_SIZE: Batches to aggregate (default: 5)
+    - GEN_BATCH_AGGREGATION_TIMEOUT_MS: Aggregation timeout (default: 200)
+    - GEN_RU_PER_DOCUMENT: RU per document (default: 6)
+    - GEN_RU_CHECK_INTERVAL_SECONDS: RU check interval (default: 10)
+    - GEN_MONITORING_BATCH_INTERVAL: Monitoring interval (default: 10)
+    - GEN_PROGRESS_UPDATE_INTERVAL_BATCHES: Progress update interval (default: 10)
+    - GEN_RU_THROTTLE_THRESHOLD: RU throttle threshold (default: 40000)
+    - GEN_RU_THROTTLE_PERCENTAGE: RU throttle percentage (default: 90)
+    - GEN_DISABLE_THROTTLING: Disable throttling (default: true)
+    - GEN_MAX_RETRIES: Maximum retries (default: 3)
+    - GEN_BACKOFF_BASE_SECONDS: Backoff base seconds (default: 0.1)
+    - GEN_PERFORMANCE_WINDOW_SIZE: Performance window size (default: 20)
+    - GEN_PERFORMANCE_CHECK_INTERVAL_SECONDS: Performance check interval (default: 30)
+    - GEN_THROTTLING_THRESHOLD_PERCENTAGE: Throttling threshold (default: 10)
+    - GEN_SCALING_COOLDOWN_SECONDS: Scaling cooldown (default: 60)
+    - GEN_SCALE_UP_COOLDOWN_SECONDS: Scale up cooldown (default: 30)
+    - GEN_PROGRESS_SMOOTHING: Progress bar smoothing (default: 0.1)
+    - GEN_PROGRESS_MINITERS: Progress bar miniters (default: 1000)
+    - GEN_DOCUMENT_SIZE_KB: Document size in KB (default: 2.5)
+    - GEN_DOCUMENT_SIZE_MULTIPLIER: Document size multiplier (default: 1024)
+    
+    Example:
+        generator = DataGenerator()
+        await generator.connect_to_cosmos()
+        await generator.generate_specific_amount(1000000)
+        await generator.cleanup()
+    """
     
     def __init__(self):
-        self.cosmos_connection_string = os.getenv('COSMOS_DB_CONNECTION_STRING')
-        self.cosmos_db_name = os.getenv('COSMOS_DB_NAME', 'volvo-service-orders')
-        self.cosmos_collection_name = os.getenv('COSMOS_DB_COLLECTION', 'serviceorders')
+        # Database connection settings (using GEN_ prefix for all database settings)
+        self.cosmos_connection_string = os.getenv('GEN_DB_CONNECTION_STRING')
+        self.cosmos_db_name = os.getenv('GEN_DB_NAME', 'volvo-service-orders')
+        self.cosmos_collection_name = os.getenv('GEN_DB_COLLECTION', 'serviceorders')
         
-        self.batch_size = int(os.getenv('BATCH_SIZE', 5000))  # Optimized batch size for maximum speed
-        self.total_documents = int(os.getenv('TOTAL_DOCUMENTS', 10000000))
-        self.concurrent_workers = int(os.getenv('CONCURRENT_WORKERS', 16))  # More workers for maximum speed
+        # Basic generation settings (using new GEN_ prefix)
+        self.batch_size = int(os.getenv('GEN_BATCH_SIZE', 5000))
+        self.total_documents = int(os.getenv('GEN_TOTAL_DOCUMENTS', 10000000))
+        self.concurrent_workers = int(os.getenv('GEN_WORKERS', 16))
         
-        # Parallel generation/write optimization (ULTRA-FAST)
-        self.generation_workers = int(os.getenv('GENERATION_WORKERS', 8))  # Dedicated generation workers
-        self.write_workers = int(os.getenv('WRITE_WORKERS', 16))  # Dedicated write workers
+        # Parallel generation/write optimization (using new GEN_ prefix)
+        self.generation_workers = int(os.getenv('GEN_WORKERS', 8))
+        self.write_workers = int(os.getenv('GEN_WRITE_WORKERS', 16))
         self.generation_queue = None  # Will be initialized in connect_to_cosmos
         self.write_queue = None  # Will be initialized in connect_to_cosmos
         self.generation_tasks = []
         self.write_tasks = []
+        
+        # Connection pool settings (using new GEN_ prefix)
+        self.pool_size = int(os.getenv('GEN_POOL_SIZE', 400))
+        self.max_pool_size = int(os.getenv('GEN_MAX_POOL_SIZE', 600))
+        self.min_pool_size = int(os.getenv('GEN_MIN_POOL_SIZE', 100))
+        self.max_idle_time_ms = int(os.getenv('GEN_MAX_IDLE_TIME_MS', 300000))
+        self.warmup_connections = int(os.getenv('GEN_WARMUP_CONNECTIONS', 30))
+        
+        # Queue settings (using new GEN_ prefix)
+        self.generation_queue_multiplier = int(os.getenv('GEN_QUEUE_MULTIPLIER', 10))
+        self.write_queue_multiplier = int(os.getenv('GEN_WRITE_QUEUE_MULTIPLIER', 10))
+        
+        # Batch aggregation settings (CONFIGURABLE)
+        self.batch_aggregation_size = int(os.getenv('GEN_BATCH_AGGREGATION_SIZE', 5))
+        self.batch_aggregation_timeout_ms = int(os.getenv('GEN_BATCH_AGGREGATION_TIMEOUT_MS', 200))
+        
+        # RU monitoring settings (CONFIGURABLE)
+        self.ru_per_document = int(os.getenv('GEN_RU_PER_DOCUMENT', 6))
+        self.ru_check_interval = float(os.getenv('GEN_RU_CHECK_INTERVAL_SECONDS', 10.0))
+        self.monitoring_batch_interval = int(os.getenv('GEN_MONITORING_BATCH_INTERVAL', 10))
+        self.progress_update_interval = int(os.getenv('GEN_PROGRESS_UPDATE_INTERVAL_BATCHES', 10))
+        self.ru_throttle_threshold = int(os.getenv('GEN_RU_THROTTLE_THRESHOLD', 40000))
+        self.ru_throttle_percentage = int(os.getenv('GEN_RU_THROTTLE_PERCENTAGE', 90))
+        
+        # Retry logic settings (CONFIGURABLE)
+        self.max_retries = int(os.getenv('GEN_MAX_RETRIES', 3))
+        self.backoff_base_seconds = float(os.getenv('GEN_BACKOFF_BASE_SECONDS', 0.1))
+        
+        # Performance monitoring settings (CONFIGURABLE)
+        self.performance_window_size = int(os.getenv('GEN_PERFORMANCE_WINDOW_SIZE', 20))
+        self.performance_check_interval = int(os.getenv('GEN_PERFORMANCE_CHECK_INTERVAL_SECONDS', 30))
+        self.throttling_threshold_percentage = float(os.getenv('GEN_THROTTLING_THRESHOLD_PERCENTAGE', 10.0))
+        self.scaling_cooldown_seconds = int(os.getenv('GEN_SCALING_COOLDOWN_SECONDS', 60))
+        self.scale_up_cooldown_seconds = int(os.getenv('GEN_SCALE_UP_COOLDOWN_SECONDS', 30))
+        
+        # Progress bar settings (CONFIGURABLE)
+        self.progress_smoothing = float(os.getenv('GEN_PROGRESS_SMOOTHING', 0.1))
+        self.progress_miniters = int(os.getenv('GEN_PROGRESS_MINITERS', 1000))
+        
+        # Document size estimation (CONFIGURABLE)
+        self.document_size_kb = float(os.getenv('GEN_DOCUMENT_SIZE_KB', 2.5))
+        self.document_size_multiplier = int(os.getenv('GEN_DOCUMENT_SIZE_MULTIPLIER', 1024))
         
         self.client: Optional[AsyncIOMotorClient] = None
         self.collection = None
@@ -72,20 +180,18 @@ class DataGenerator:
         self.ru_consumed_in_window = 0  # RU consumed in current window
         self.ru_per_second = 0
         self.last_ru_check = time.time()
-        self.ru_check_interval = 10.0  # Check RU rate every 10 seconds for accuracy
+        self.disable_throttling = os.getenv('GEN_DISABLE_THROTTLING', 'false').lower() == 'true'
         self.is_throttling = False  # Track throttling state for progress bar
         self.batch_count = 0  # Count batches for reduced monitoring
-        self.monitoring_batch_interval = 10  # Monitor every 10 batches for responsiveness
-        self.progress_update_interval = 10  # Update progress bar every 10 batches
         self.pending_updates = 0  # Accumulate updates before showing
         
-        # Adaptive concurrency control (ULTRA-FAST)
+        # Adaptive concurrency control (using new GEN_ prefix)
         self.current_generation_workers = self.generation_workers
         self.current_write_workers = self.write_workers
-        self.max_generation_workers = int(os.getenv('MAX_GENERATION_WORKERS', 12))
-        self.min_generation_workers = int(os.getenv('MIN_GENERATION_WORKERS', 4))
-        self.max_write_workers = int(os.getenv('MAX_WRITE_WORKERS', 24))
-        self.min_write_workers = int(os.getenv('MIN_WRITE_WORKERS', 8))
+        self.max_generation_workers = int(os.getenv('GEN_MAX_WORKERS', 12))
+        self.min_generation_workers = int(os.getenv('GEN_MIN_WORKERS', 4))
+        self.max_write_workers = int(os.getenv('GEN_MAX_WRITE_WORKERS', 24))
+        self.min_write_workers = int(os.getenv('GEN_MIN_WRITE_WORKERS', 8))
         self.performance_window = []
         self.last_performance_check = time.time()
         self.scaling_cooldown = 0
@@ -108,17 +214,17 @@ class DataGenerator:
             compatible_client = create_compatible_cosmos_client(self.cosmos_connection_string)
             self.client = compatible_client.create_client(async_client=True)
             
-            # Optimize connection settings for ULTRA-FAST speed
+            # Optimize connection settings for ULTRA-FAST speed (CONFIGURABLE)
             # Increase connection pool size for better concurrency
-            self.client._pool_size = 400  # More connections for concurrent operations
-            self.client._max_pool_size = 600  # Maximum pool size
-            self.client._min_pool_size = 100  # Higher minimum pool size
-            self.client._max_idle_time_ms = 300000  # Keep connections alive much longer
+            self.client._pool_size = self.pool_size
+            self.client._max_pool_size = self.max_pool_size
+            self.client._min_pool_size = self.min_pool_size
+            self.client._max_idle_time_ms = self.max_idle_time_ms
             
             # Pre-warm connection pool for maximum performance
-            logger.info("Pre-warming Cosmos connection pool...")
+            logger.info(f"Pre-warming Cosmos connection pool ({self.warmup_connections} connections)...")
             warmup_tasks = []
-            for i in range(30):  # Create 30 warmup connections
+            for i in range(self.warmup_connections):
                 warmup_tasks.append(self.client.admin.command('ping'))
             await asyncio.gather(*warmup_tasks, return_exceptions=True)
             logger.info("Connection pool pre-warmed successfully")
@@ -133,9 +239,10 @@ class DataGenerator:
             # Use unacknowledged writes for better performance (fire and forget)
             self.collection = self.collection.with_options(write_concern=WriteConcern(w=0))
             
-            # Initialize async queues for parallel processing
-            self.generation_queue = asyncio.Queue(maxsize=self.generation_workers * 2)
-            self.write_queue = asyncio.Queue(maxsize=self.write_workers * 2)
+            # Initialize async queues for parallel processing (CONFIGURABLE)
+            # Deep queues to keep workers saturated
+            self.generation_queue = asyncio.Queue(maxsize=self.generation_workers * self.generation_queue_multiplier)
+            self.write_queue = asyncio.Queue(maxsize=self.write_workers * self.write_queue_multiplier)
             
             logger.info("Successfully connected to Azure Cosmos DB with ULTRA-FAST optimizations")
             logger.info("🚀 ULTRA-FAST data generation settings active:")
@@ -144,13 +251,16 @@ class DataGenerator:
             logger.info(f"   ✍️ Write workers: {self.write_workers}")
             logger.info(f"   📈 Max generation workers: {self.max_generation_workers}")
             logger.info(f"   📈 Max write workers: {self.max_write_workers}")
-            logger.info(f"   🔄 Retry logic: 3 attempts with exponential backoff")
+            logger.info(f"   🔄 Retry logic: {self.max_retries} attempts with exponential backoff")
             logger.info(f"   ⚡ Write concern: Unacknowledged (w=0)")
-            logger.info(f"   🚀 Connection pool: 400-600 connections (pre-warmed)")
-            logger.info(f"   📚 Generation queue: {self.generation_workers * 2} capacity")
-            logger.info(f"   ✍️ Write queue: {self.write_workers * 2} capacity")
+            logger.info(f"   🚀 Connection pool: {self.pool_size}-{self.max_pool_size} connections (pre-warmed: {self.warmup_connections})")
+            logger.info(f"   📚 Generation queue: {self.generation_workers * self.generation_queue_multiplier} capacity")
+            logger.info(f"   ✍️ Write queue: {self.write_workers * self.write_queue_multiplier} capacity")
             logger.info(f"   ⚡ Parallel generation/write: Enabled")
             logger.info(f"   🎯 Adaptive concurrency: Enabled")
+            logger.info(f"   📊 RU per document: {self.ru_per_document}")
+            logger.info(f"   🚦 RU throttle threshold: {self.ru_throttle_threshold} ({self.ru_throttle_percentage}% of limit)")
+            logger.info(f"   🔄 Batch aggregation: {self.batch_aggregation_size} batches or {self.batch_aggregation_timeout_ms}ms")
             
             return True
             
@@ -269,30 +379,52 @@ class DataGenerator:
         except Exception as e:
             logger.error(f"Generation worker {worker_id} failed: {e}")
 
-    async def _write_worker(self, worker_id: int):
-        """Parallel write worker that processes batches from the write queue"""
+    async def _write_worker(self, worker_id: int, pbar=None):
+        """ULTRA-FAST write worker with batch aggregation for maximum throughput (like Atlas migration)"""
         try:
+            batch_buffer = []
+            batch_count = 0
+            last_process_time = time.time()
+            
             while self.is_running and self.write_queue is not None:
                 try:
-                    # Get batch from write queue with timeout
-                    batch_data = await asyncio.wait_for(self.write_queue.get(), timeout=1.0)
+                    # Collect batches with timeout to prevent getting stuck
+                    try:
+                        batch_data = await asyncio.wait_for(self.write_queue.get(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        # Process any buffered batches if timeout occurs
+                        if batch_buffer:
+                            await self.write_batch_aggregated(batch_buffer, worker_id, pbar)
+                            batch_buffer = []
+                            batch_count = 0
+                        continue
                     
                     if batch_data is None:  # End signal
+                        # Process remaining batches in buffer
+                        if batch_buffer:
+                            await self.write_batch_aggregated(batch_buffer, worker_id, pbar)
                         break
                         
                     batch, batch_number = batch_data
+                    batch_buffer.append(batch)
+                    batch_count += 1
                     
-                    # Write batch with retry logic
-                    success = await self.write_batch_with_retry(batch)
+                    # Process aggregated batches when buffer is full OR after timeout
+                    current_time = time.time()
+                    should_process = (
+                        len(batch_buffer) >= self.batch_aggregation_size or  # Buffer full
+                        (batch_buffer and current_time - last_process_time > self.batch_aggregation_timeout_ms / 1000.0)  # Timeout
+                    )
                     
-                    if success:
-                        self.documents_written += len(batch)
+                    if should_process:
+                        await self.write_batch_aggregated(batch_buffer, worker_id, pbar)
+                        batch_buffer = []
+                        batch_count = 0
+                        last_process_time = current_time
                     
-                    # Mark write task as done
+                    # Mark task as done
                     self.write_queue.task_done()
                     
-                except asyncio.TimeoutError:
-                    continue
                 except Exception as e:
                     logger.error(f"Error in write worker {worker_id}: {e}")
                     
@@ -327,12 +459,11 @@ class DataGenerator:
         
         for attempt in range(max_retries + 1):
             try:
-                # Correct RU calculation for current window
-                avg_ru_per_doc = 6  # Conservative estimate for complex documents
-                batch_ru = len(batch) * avg_ru_per_doc
+                # Correct RU calculation for current window (CONFIGURABLE)
+                batch_ru = len(batch) * self.ru_per_document
                 self.ru_consumed_in_window += batch_ru
                 
-                # Monitor RU consumption every 5 batches for responsiveness
+                # Monitor RU consumption every N batches for responsiveness (CONFIGURABLE)
                 if (self.batch_count % self.monitoring_batch_interval == 0):
                     current_time = time.time()
                     time_diff = current_time - self.last_ru_check
@@ -345,13 +476,16 @@ class DataGenerator:
                         self.last_ru_check = current_time
                         self.ru_consumed_in_window = 0
                         
-                        # Throttle if consuming too many RU (for 40K RU provisioned)
-                        if self.ru_per_second > 36000:  # 90% of 40K RU limit for safety
-                            self.is_throttling = True
-                            # Proportional throttling: more aggressive for higher RU consumption
-                            excess_ru = self.ru_per_second - 36000
-                            throttle_time = (excess_ru / 36000) * 0.1  # Up to 0.1s throttle
-                            await asyncio.sleep(throttle_time)
+                        # Throttle if consuming too many RU (CONFIGURABLE)
+                        if not self.disable_throttling:
+                            if self.ru_per_second > self.ru_throttle_threshold:
+                                self.is_throttling = True
+                                # Proportional throttling: more aggressive for higher RU consumption
+                                excess_ru = self.ru_per_second - self.ru_throttle_threshold
+                                throttle_time = (excess_ru / self.ru_throttle_threshold) * 0.1  # Up to 0.1s throttle
+                                await asyncio.sleep(throttle_time)
+                            else:
+                                self.is_throttling = False
                         else:
                             self.is_throttling = False
                 
@@ -366,10 +500,10 @@ class DataGenerator:
             except Exception as e:
                 error_str = str(e).lower()
                 
-                # Handle 429 throttling errors with exponential backoff
+                # Handle 429 throttling errors with exponential backoff (CONFIGURABLE)
                 if "429" in error_str or "throttle" in error_str or "rate limit" in error_str:
                     if attempt < max_retries:
-                        backoff_time = (2 ** attempt) * 0.1  # Exponential backoff: 0.1s, 0.2s, 0.4s
+                        backoff_time = (2 ** attempt) * self.backoff_base_seconds  # Configurable exponential backoff
                         logger.warning(f"Throttled (attempt {attempt + 1}/{max_retries + 1}), retrying in {backoff_time:.1f}s...")
                         await asyncio.sleep(backoff_time)
                         continue
@@ -385,6 +519,75 @@ class DataGenerator:
         
         return False
 
+    async def write_batch_aggregated(self, batches: List[List[dict]], worker_id: int, pbar=None) -> bool:
+        """ULTRA-FAST aggregated batch write with bulk operations (like Atlas migration)"""
+        if not batches:
+            return True
+            
+        try:
+            # Flatten batches
+            all_docs = []
+            for batch in batches:
+                all_docs.extend(batch)
+            
+            if not all_docs:
+                return True
+            
+            logger.debug(f"Worker {worker_id}: Processing aggregated batch of {len(all_docs)} documents")
+            
+            # ULTRA-FAST bulk write with maximum parallelization
+            async def _bulk_write_aggregated():
+                try:
+                    from pymongo import InsertOne
+                    
+                    # Convert all documents to bulk operations
+                    bulk_operations = [InsertOne(doc) for doc in all_docs]
+                    
+                    # Execute bulk write with optimized settings
+                    result = await self.collection.bulk_write(
+                        bulk_operations,
+                        ordered=False,  # Allow parallel processing
+                        bypass_document_validation=False
+                    )
+                    
+                    # Update counters
+                    self.documents_written += len(all_docs)
+                    
+                    # Update progress bar
+                    if pbar:
+                        pbar.update(len(all_docs))
+                        pbar.refresh()
+                    
+                    logger.debug(f"Worker {worker_id}: Successfully wrote {len(all_docs)} documents")
+                    return True
+                    
+                except Exception as e:
+                    logger.error(f"Worker {worker_id}: Bulk write failed: {e}")
+                    # Fallback to individual batch writes
+                    return await self._fallback_batch_writes(all_docs, worker_id, pbar)
+            
+            return await _bulk_write_aggregated()
+            
+        except Exception as e:
+            logger.error(f"Worker {worker_id}: Error in write_batch_aggregated: {e}")
+            return False
+    
+    async def _fallback_batch_writes(self, all_docs: List[dict], worker_id: int, pbar=None) -> bool:
+        """Fallback to individual batch writes if bulk write fails"""
+        try:
+            # Split into smaller chunks and write individually
+            chunk_size = 1000
+            for i in range(0, len(all_docs), chunk_size):
+                chunk = all_docs[i:i + chunk_size]
+                success = await self.write_batch_with_retry(chunk)
+                if success and pbar:
+                    pbar.update(len(chunk))
+                    pbar.refresh()
+            return True
+        except Exception as e:
+            logger.error(f"Worker {worker_id}: Fallback writes failed: {e}")
+            return False
+
     def _adaptive_concurrency_control(self, performance_metric: float):
         """Adaptive concurrency control based on performance and throttling"""
         try:
@@ -398,12 +601,12 @@ class DataGenerator:
                 'write_workers': self.current_write_workers
             })
             
-            # Keep only last 20 performance measurements
-            self.performance_window = self.performance_window[-20:]
+            # Keep only last N performance measurements (CONFIGURABLE)
+            self.performance_window = self.performance_window[-self.performance_window_size:]
             
-            # Check if we should evaluate scaling (every 10 batches or 30 seconds)
+            # Check if we should evaluate scaling (CONFIGURABLE)
             if (len(self.performance_window) >= 5 and 
-                current_time - self.last_performance_check > 30):
+                current_time - self.last_performance_check > self.performance_check_interval):
                 
                 self.last_performance_check = current_time
                 
@@ -414,16 +617,16 @@ class DataGenerator:
                 recent_performance = self.performance_window[-3:] if len(self.performance_window) >= 3 else self.performance_window
                 recent_avg = sum(p['performance'] for p in recent_performance) / len(recent_performance)
                 
-                # Throttling detection: recent performance significantly lower than average
+                # Throttling detection: recent performance significantly lower than average (CONFIGURABLE)
                 performance_degradation = (avg_performance - recent_avg) / avg_performance if avg_performance > 0 else 0
                 
-                if performance_degradation > 0.1:  # 10% throttling threshold
+                if performance_degradation > (self.throttling_threshold_percentage / 100.0):
                     # Throttling detected - scale down
                     if self.current_write_workers > self.min_write_workers:
                         old_workers = self.current_write_workers
                         self.current_write_workers = max(self.min_write_workers, int(self.current_write_workers * 0.8))
                         logger.info(f"🔄 Throttling detected! Scaling down write workers: {old_workers} → {self.current_write_workers}")
-                        self.scaling_cooldown = current_time + 60  # 1 minute cooldown
+                        self.scaling_cooldown = current_time + self.scaling_cooldown_seconds
                         
                 elif (performance_degradation < -0.05 and  # Performance improving
                       self.current_write_workers < self.max_write_workers and
@@ -432,94 +635,79 @@ class DataGenerator:
                     old_workers = self.current_write_workers
                     self.current_write_workers = min(self.max_write_workers, int(self.current_write_workers * 1.2))
                     logger.info(f"🚀 Performance improving! Scaling up write workers: {old_workers} → {self.current_write_workers}")
-                    self.scaling_cooldown = current_time + 30  # 30 second cooldown
+                    self.scaling_cooldown = current_time + self.scale_up_cooldown_seconds
                     
         except Exception as e:
             logger.debug(f"Error in adaptive concurrency control: {e}")
 
-    async def generate_and_write_continuously(self):
-        """ULTRA-FAST parallel data generation with read-ahead caching and parallel generation/write operations"""
+    async def generate_specific_amount(self, target_documents: int):
+        """Generate a specific amount of data using parallel write workers (like Atlas migration)"""
         logger.info(f"🚀 Starting ULTRA-FAST parallel data generation...")
         logger.info(f"Database: {self.cosmos_db_name}")
         logger.info(f"Collection: {self.cosmos_collection_name}")
-        logger.info(f"Target: {self.total_documents:,} documents")
+        logger.info(f"Target: {target_documents:,} documents")
         logger.info(f"Batch size: {self.batch_size}")
-        logger.info(f"Generation workers: {self.generation_workers}")
         logger.info(f"Write workers: {self.write_workers}")
         
         self.start_time = time.time()
+        self.total_documents = target_documents
         
-        # Create progress bar with RU consumption display
+        # Create progress bar
         pbar = tqdm(
-            total=self.total_documents, 
+            total=target_documents, 
             desc=f"🚀 ULTRA-FAST Generation to {self.cosmos_db_name}.{self.cosmos_collection_name}", 
             unit="docs",
             unit_scale=True,
             ncols=120,
             bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}',
             colour='green',
-            smoothing=0.1,
-            miniters=1000,
+            smoothing=self.progress_smoothing,
+            miniters=self.progress_miniters,
             dynamic_ncols=True,
             leave=True
         )
         
         try:
-            # Start parallel generation workers
-            self.generation_tasks = []
-            for i in range(self.generation_workers):
-                task = asyncio.create_task(self._generation_worker(i))
-                self.generation_tasks.append(task)
-            
             # Start parallel write workers
             self.write_tasks = []
             for i in range(self.write_workers):
-                task = asyncio.create_task(self._write_worker(i))
+                task = asyncio.create_task(self._write_worker(i, pbar))
                 self.write_tasks.append(task)
             
-            # Process batches with parallel generation and writes
+            # Generate and queue batches
             current_batch_number = 0
-            remaining_docs = self.total_documents
+            remaining_docs = target_documents
             
             while remaining_docs > 0 and self.is_running:
                 try:
                     current_batch_size = min(self.batch_size, remaining_docs)
                     current_batch_number += 1
                     
-                    # Put batch request in generation queue
-                    await self.generation_queue.put((current_batch_size, current_batch_number))
+                    # Generate batch
+                    batch = self.generate_batch(current_batch_size)
+                    
+                    # Put batch in write queue for parallel processing
+                    await self.write_queue.put((batch, current_batch_number))
                     
                     remaining_docs -= current_batch_size
                     
                     # Update progress periodically
-                    if current_batch_number % 10 == 0:
-                        # Update progress bar with RU rate and worker info
-                        ru_info = f"RU:{self.ru_per_second:.0f}" if not self.is_throttling else f"\033[91mRU:{self.ru_per_second:.0f}\033[0m"
-                        worker_info = f"G:{self.current_generation_workers}W:{self.current_write_workers}"
+                    if current_batch_number % self.progress_update_interval == 0:
+                        ru_info = f"RU:{self.ru_per_second:.0f}"
+                        worker_info = f"W:{self.write_workers}"
                         pbar.set_postfix_str(f"{ru_info} {worker_info}")
-                        pbar.update(self.batch_size * 10)  # Approximate update
+                        pbar.refresh()
                         
-                        # Adaptive concurrency control
-                        self._adaptive_concurrency_control(self.ru_per_second)
-                    
                 except Exception as e:
                     logger.error(f"Error processing batch request: {e}")
                     break
-            
-            # Signal end to generation workers
-            if self.generation_queue is not None:
-                for _ in range(self.generation_workers):
-                    await self.generation_queue.put(None)
             
             # Signal end to write workers
             if self.write_queue is not None:
                 for _ in range(self.write_workers):
                     await self.write_queue.put(None)
             
-            # Wait for all workers to complete
-            if self.generation_tasks:
-                await asyncio.gather(*self.generation_tasks, return_exceptions=True)
-            
+            # Wait for all write workers to complete
             if self.write_tasks:
                 await asyncio.gather(*self.write_tasks, return_exceptions=True)
                 
@@ -532,11 +720,6 @@ class DataGenerator:
         elapsed = time.time() - self.start_time
         rate = self.documents_written / elapsed if elapsed > 0 else 0
         
-        # Calculate final statistics
-        estimated_size_gb = (self.documents_written * 2.5) / (1024**3)  # ~2.5KB per document
-        total_ru_consumed = self.documents_written * 6  # ~6 RU per document (more accurate)
-        avg_ru_rate = total_ru_consumed / elapsed if elapsed > 0 else 0
-        
         logger.info(f"🎉 Data generation completed!")
         logger.info(f"📊 Performance Summary:")
         logger.info(f"   • Database: {self.cosmos_db_name}")
@@ -545,50 +728,7 @@ class DataGenerator:
         logger.info(f"   • Total time: {elapsed:.2f} seconds")
         logger.info(f"   • Average rate: {rate:.0f} documents/second")
         logger.info(f"   • Peak RU rate: {self.ru_per_second:.0f} RU/sec")
-        logger.info(f"   • Average RU rate: {avg_ru_rate:.0f} RU/sec")
-        logger.info(f"   • Total RU consumed: {total_ru_consumed:.0f} RU")
-        logger.info(f"   • Data size: {estimated_size_gb:.2f} GB")
         logger.info(f"   • Errors: {self.errors}")
-        logger.info(f"   • Throttling threshold: 36,000 RU/sec (90% of 40K limit)")
-
-    async def generate_specific_amount(self, target_documents: int):
-        """Generate a specific amount of data and stop"""
-        logger.info(f"Generating {target_documents:,} documents...")
-        
-        self.start_time = time.time()
-        pbar = tqdm(
-            total=target_documents, 
-            desc="🚀 Data Generation", 
-            unit="docs",
-            unit_scale=True,
-            ncols=80,
-            bar_format='{desc}: {percentage:3.0f}%|{bar:20}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
-            colour='green'
-        )
-        
-        try:
-            while self.documents_written < target_documents:
-                remaining = target_documents - self.documents_written
-                current_batch_size = min(self.batch_size, remaining)
-                
-                batch = self.generate_batch(current_batch_size)
-                success = await self.write_batch_with_retry(batch)
-                
-                if success:
-                    pbar.update(len(batch))
-                    pbar.refresh()  # Force refresh
-                
-                await asyncio.sleep(0.01)
-                
-        except Exception as e:
-            logger.error(f"Error in specific amount generation: {e}")
-        finally:
-            pbar.close()
-            
-        elapsed = time.time() - self.start_time
-        rate = self.documents_written / elapsed if elapsed > 0 else 0
-        
-        logger.info(f"Generation completed: {self.documents_written:,} documents in {elapsed:.2f}s ({rate:.0f} docs/sec)")
 
     async def cleanup(self):
         """Clean up resources"""
@@ -606,14 +746,10 @@ async def main():
             logger.error("Failed to connect to database. Exiting.")
             return
         
-        # Check if we should run continuously or generate specific amount
-        mode = os.getenv('GENERATION_MODE', 'continuous')
-        
-        if mode == 'continuous':
-            await generator.generate_and_write_continuously()
-        else:
-            target = int(os.getenv('TARGET_DOCUMENTS', 1000000))
-            await generator.generate_specific_amount(target)
+        # Generate specific amount of documents (user must specify GEN_TOTAL_DOCUMENTS)
+        target = int(os.getenv('GEN_TOTAL_DOCUMENTS', 1000000))
+        logger.info(f"Generating {target:,} documents...")
+        await generator.generate_specific_amount(target)
             
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt, shutting down...")
@@ -623,10 +759,42 @@ async def main():
         await generator.cleanup()
 
 if __name__ == "__main__":
-    # Check if environment variables are set
-    if not os.getenv('COSMOS_DB_CONNECTION_STRING'):
-        logger.error("COSMOS_DB_CONNECTION_STRING environment variable is required")
+    # Validate required environment variables (using GEN_ prefix)
+    connection_string = os.getenv('GEN_DB_CONNECTION_STRING')
+    db_name = os.getenv('GEN_DB_NAME')
+    collection_name = os.getenv('GEN_DB_COLLECTION')
+    
+    if not connection_string:
+        logger.error("Missing required environment variable: GEN_DB_CONNECTION_STRING")
         sys.exit(1)
+    if not db_name:
+        logger.error("Missing required environment variable: GEN_DB_NAME")
+        sys.exit(1)
+    if not collection_name:
+        logger.error("Missing required environment variable: GEN_DB_COLLECTION")
+        sys.exit(1)
+    
+    # Validate numeric environment variables (GEN_ prefix only)
+    numeric_vars = [
+        'GEN_BATCH_SIZE', 'GEN_TOTAL_DOCUMENTS', 'GEN_WORKERS', 'GEN_WRITE_WORKERS',
+        'GEN_MAX_WORKERS', 'GEN_MIN_WORKERS', 'GEN_MAX_WRITE_WORKERS', 'GEN_MIN_WRITE_WORKERS',
+        'GEN_POOL_SIZE', 'GEN_MAX_POOL_SIZE', 'GEN_MIN_POOL_SIZE', 'GEN_MAX_IDLE_TIME_MS',
+        'GEN_WARMUP_CONNECTIONS', 'GEN_QUEUE_MULTIPLIER', 'GEN_WRITE_QUEUE_MULTIPLIER',
+        'GEN_BATCH_AGGREGATION_SIZE', 'GEN_BATCH_AGGREGATION_TIMEOUT_MS', 'GEN_RU_PER_DOCUMENT',
+        'GEN_RU_CHECK_INTERVAL_SECONDS', 'GEN_MONITORING_BATCH_INTERVAL', 'GEN_PROGRESS_UPDATE_INTERVAL_BATCHES',
+        'GEN_RU_THROTTLE_THRESHOLD', 'GEN_RU_THROTTLE_PERCENTAGE', 'GEN_MAX_RETRIES',
+        'GEN_PERFORMANCE_WINDOW_SIZE', 'GEN_PERFORMANCE_CHECK_INTERVAL_SECONDS',
+        'GEN_THROTTLING_THRESHOLD_PERCENTAGE', 'GEN_SCALING_COOLDOWN_SECONDS',
+        'GEN_SCALE_UP_COOLDOWN_SECONDS', 'GEN_PROGRESS_MINITERS', 'GEN_DOCUMENT_SIZE_MULTIPLIER'
+    ]
+    
+    for var in numeric_vars:
+        value = os.getenv(var)
+        if value and not value.replace('.', '').replace('-', '').isdigit():
+            logger.error(f"Invalid numeric value for {var}: {value}")
+            sys.exit(1)
+    
+    logger.info("✅ All environment variables validated successfully")
     
     # Run the generator
     asyncio.run(main())

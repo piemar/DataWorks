@@ -24,14 +24,14 @@ class IndexManager:
         load_dotenv('config.env')  # Fallback to example values
         
         # Connection strings
-        self.cosmos_connection_string = os.getenv('COSMOS_DB_CONNECTION_STRING')
-        self.atlas_connection_string = os.getenv('MONGODB_ATLAS_CONNECTION_STRING')
+        self.cosmos_connection_string = os.getenv('GEN_DB_CONNECTION_STRING')
+        self.atlas_connection_string = os.getenv('MIG_TARGET_DB_CONNECTION_STRING')
         
         # Database and collection names
-        self.cosmos_db_name = os.getenv('COSMOS_DB_NAME', 'volvo-service-orders')
-        self.cosmos_collection_name = os.getenv('COSMOS_DB_COLLECTION', 'serviceorders')
-        self.atlas_db_name = os.getenv('MONGODB_ATLAS_DB_NAME', 'volvo-service-orders')
-        self.atlas_collection_name = os.getenv('MONGODB_ATLAS_COLLECTION', 'serviceorders')
+        self.cosmos_db_name = os.getenv('GEN_DB_NAME', 'volvo-service-orders')
+        self.cosmos_collection_name = os.getenv('GEN_DB_COLLECTION', 'serviceorders')
+        self.atlas_db_name = os.getenv('MIG_TARGET_DB_NAME', 'volvo-service-orders')
+        self.atlas_collection_name = os.getenv('MIG_TARGET_DB_COLLECTION', 'serviceorders')
         
         # Clients
         self.cosmos_client = None
