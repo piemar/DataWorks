@@ -23,19 +23,21 @@ class CompatibleMongoClient:
         try:
             # Add ultra-optimized compatibility options for maximum performance
             compatibility_options = {
-                'serverSelectionTimeoutMS': 10000,  # Faster server selection
-                'connectTimeoutMS': 10000,        # Faster connection
-                'socketTimeoutMS': 30000,         # Keep socket timeout reasonable
-                'maxPoolSize': 100,               # Increased for high concurrency
-                'minPoolSize': 20,                # Keep more connections warm
-                'retryWrites': False,             # Disable retryWrites for older versions
+                'serverSelectionTimeoutMS': 5000,   # Faster server selection
+                'connectTimeoutMS': 5000,          # Faster connection
+                'socketTimeoutMS': 60000,         # Longer socket timeout for large batches
+                'maxPoolSize': 1000,              # Maximum connections for high concurrency
+                'minPoolSize': 200,               # Keep more connections warm
+                'retryWrites': False,             # Disable retryWrites for maximum speed
                 'w': 0,                          # Fire-and-forget writes for speed
                 'j': False,                      # No journaling for speed
                 'readPreference': 'primary',
-                'maxIdleTimeMS': 300000,         # Keep connections alive longer
-                'heartbeatFrequencyMS': 10000,   # Faster heartbeat
-                'compressors': 'zstd',           # Compression for network efficiency
-                'zlibCompressionLevel': 6,       # Balanced compression
+                'maxIdleTimeMS': 600000,         # Keep connections alive longer
+                'heartbeatFrequencyMS': 5000,    # Faster heartbeat
+                'compressors': 'zstd',            # Compression for network efficiency
+                'zlibCompressionLevel': 1,       # Fastest compression
+                'waitQueueTimeoutMS': 5000,     # Faster wait queue timeout
+                'appName': 'UltraFastMigration' # Application name for monitoring
             }
             
             # Merge with user-provided options

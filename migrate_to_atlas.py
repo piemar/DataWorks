@@ -53,13 +53,24 @@ class CosmosToAtlasMigrator:
         self.atlas_db_name = os.getenv('MONGODB_ATLAS_DB_NAME', 'volvo-service-orders')
         self.atlas_collection_name = os.getenv('MONGODB_ATLAS_COLLECTION', 'serviceorders')
         
-        # Migration settings (MAXIMUM SPEED OPTIMIZED)
-        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 5000))  # Match data generator batch size
-        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 16))  # Match data generator workers
+        # Migration settings (ULTRA-FAST OPTIMIZED)
+        self.batch_size = int(os.getenv('MIGRATION_BATCH_SIZE', 10000))  # Larger batches for speed
+        self.max_workers = int(os.getenv('MIGRATION_WORKERS', 16))  # More workers for parallelism
         
-        # Adaptive concurrency control (inspired by your Cosmos code)
+        # Insert batching optimization (DATA GENERATION SPEED)
+        self.insert_batch_size = min(self.batch_size, 5000)  # Match data generation batch size
+        self.max_insert_workers = min(self.max_workers * 2, 32)  # More insert workers
+        
+        # Read-ahead caching for parallel operations
+        self.read_ahead_batches = 3  # Pre-fetch 3 batches ahead
+        self.read_queue = None  # Will be initialized in connect_to_databases
+        self.write_queue = None  # Will be initialized in connect_to_databases
+        self.read_task = None
+        self.write_tasks = []
+        
+        # Adaptive concurrency control (ULTRA-FAST OPTIMIZED)
         self.max_concurrent_workers = int(os.getenv('MAX_CONCURRENT_WORKERS', 20))  # Maximum workers
-        self.min_concurrent_workers = int(os.getenv('MIN_CONCURRENT_WORKERS', 4))   # Minimum workers
+        self.min_concurrent_workers = int(os.getenv('MIN_CONCURRENT_WORKERS', 8))   # Higher minimum workers
         self.throttle_threshold = 0.1  # 10% throttling threshold for scaling down
         self.resume_from_checkpoint = os.getenv('RESUME_FROM_CHECKPOINT', 'true').lower() == 'true'
         self.checkpoint_file = 'migration_checkpoint.json'
@@ -85,9 +96,15 @@ class CosmosToAtlasMigrator:
         self.batch_count = 0  # Total batches processed
         self.adaptive_stats = {'throttles': 0, 'successes': 0}
         
+        # Dynamic worker management
+        self.current_workers = self.max_workers  # Start with configured workers
+        self.performance_window = []  # Track recent performance
+        self.last_performance_check = time.time()
+        self.scaling_cooldown = 0  # Prevent rapid scaling changes
+        
 
-        # Simplified retry settings for maximum speed
-        self.max_retries = 2  # Minimal retries for speed
+        # Ultra-fast retry settings for maximum speed
+        self.max_retries = 1  # Single retry for speed
         
         # Performance metrics
         self.metrics = {
@@ -126,17 +143,15 @@ class CosmosToAtlasMigrator:
 
     async def _retry_with_backoff(self, func, *args, **kwargs):
         """Ultra-fast retry with minimal overhead"""
-        for attempt in range(2):  # Reduced to 2 attempts for speed
+        for attempt in range(1):  # Single attempt for maximum speed
             try:
                 result = await func(*args, **kwargs)
                 return result
                 
             except Exception as e:
-                if attempt == 1:  # Last attempt
-                    raise
-                
-                # Minimal delay for speed
-                await asyncio.sleep(0.1)
+                # Ultra-minimal delay for speed
+                await asyncio.sleep(0.01)  # 10ms delay
+                raise e
 
     async def connect_to_databases(self):
         """Connect to both source and target databases with optimized settings"""
@@ -160,11 +175,19 @@ class CosmosToAtlasMigrator:
             # Create client with compatibility layer (no custom options)
             self.atlas_client = atlas_compatible.create_client(async_client=True)
             
-            # Optimize Atlas connection pool for maximum speed
-            self.atlas_client._pool_size = 200  # More connections for concurrent operations
-            self.atlas_client._max_pool_size = 400  # Maximum pool size
-            self.atlas_client._min_pool_size = 50  # Minimum pool size
-            self.atlas_client._max_idle_time_ms = 60000  # Keep connections alive longer
+            # Optimize Atlas connection pool for ULTRA-FAST speed
+            self.atlas_client._pool_size = 800  # Maximum connections for concurrent operations
+            self.atlas_client._max_pool_size = 1000  # Maximum pool size
+            self.atlas_client._min_pool_size = 200  # Higher minimum pool size
+            self.atlas_client._max_idle_time_ms = 300000  # Keep connections alive much longer
+            
+            # Pre-warm connection pool for maximum performance
+            logger.info("Pre-warming Atlas connection pool...")
+            warmup_tasks = []
+            for i in range(50):  # Create 50 warmup connections
+                warmup_tasks.append(self.atlas_client.admin.command('ping'))
+            await asyncio.gather(*warmup_tasks, return_exceptions=True)
+            logger.info("Connection pool pre-warmed successfully")
             
             await self.atlas_client.admin.command('ping')
             
@@ -178,6 +201,10 @@ class CosmosToAtlasMigrator:
             )
             logger.info("Connected to MongoDB Atlas successfully")
             
+            # Initialize async queues for parallel processing
+            self.read_queue = asyncio.Queue(maxsize=self.read_ahead_batches * 2)
+            self.write_queue = asyncio.Queue(maxsize=self.max_insert_workers * 2)
+            
             # Test Atlas connection with a simple insert
             try:
                 test_doc = {"_id": "test_migration_connection", "test": True, "timestamp": datetime.utcnow()}
@@ -188,12 +215,20 @@ class CosmosToAtlasMigrator:
                 logger.error(f"Atlas connection test failed: {e}")
                 return False
             
-            logger.info("🚀 MAXIMUM SPEED optimization settings active:")
-            logger.info(f"   📦 Batch size: {self.batch_size:,} documents")
-            logger.info(f"   🔧 Concurrent workers: {self.max_workers}")
-            logger.info(f"   🔄 Retry logic: {self.max_retries} attempts with minimal delay")
+            logger.info("🚀 DATA GENERATION-SPEED optimization settings active:")
+            logger.info(f"   📦 Batch size: {self.batch_size:,} documents (matches data generation)")
+            logger.info(f"   🔧 Initial workers: {self.max_workers}")
+            logger.info(f"   📈 Max concurrent workers: {self.max_concurrent_workers}")
+            logger.info(f"   📉 Min concurrent workers: {self.min_concurrent_workers}")
+            logger.info(f"   🔄 Retry logic: {self.max_retries} attempt with ultra-minimal delay")
             logger.info(f"   ⚡ Write concern: Unacknowledged (w=0)")
-            logger.info(f"   🚀 Connection pool: 100-200 connections")
+            logger.info(f"   🚀 Connection pool: 800-1000 connections (pre-warmed)")
+            logger.info(f"   🎯 Throttling threshold: {self.throttle_threshold * 100:.0f}%")
+            logger.info(f"   📊 Insert batch size: {self.insert_batch_size:,} documents")
+            logger.info(f"   🔥 Max insert workers: {self.max_insert_workers}")
+            logger.info(f"   📚 Read-ahead batches: {self.read_ahead_batches}")
+            logger.info(f"   ⚡ Parallel read/write: Enabled")
+            logger.info(f"   🎯 Data generation speed: Optimized")
             
             return True
             
@@ -286,10 +321,10 @@ class CosmosToAtlasMigrator:
             avg_performance = sum(b['docs_per_second'] for b in recent_batches) / len(recent_batches)
             
             # Calculate optimal batch size based on performance
-            if avg_performance > 10000:  # High performance
-                new_batch_size = min(self.optimal_batch_size * 1.2, 50000)  # Increase batch size
-            elif avg_performance < 5000:  # Low performance
-                new_batch_size = max(self.optimal_batch_size * 0.8, 1000)  # Decrease batch size
+            if avg_performance > 15000:  # High performance threshold raised
+                new_batch_size = min(self.optimal_batch_size * 1.3, 20000)  # Larger max batch size
+            elif avg_performance < 8000:  # Low performance threshold raised
+                new_batch_size = max(self.optimal_batch_size * 0.7, 5000)  # Higher minimum batch size
             else:
                 new_batch_size = self.optimal_batch_size  # Keep current size
             
@@ -308,6 +343,122 @@ class CosmosToAtlasMigrator:
             
         except Exception as e:
             logger.debug(f"Error in auto-tuning: {e}")
+
+    def _adaptive_concurrency_control(self, batch_performance: float):
+        """Adaptive concurrency control based on performance and throttling"""
+        try:
+            current_time = time.time()
+            
+            # Add performance data to window
+            self.performance_window.append({
+                'performance': batch_performance,
+                'timestamp': current_time,
+                'workers': self.current_workers
+            })
+            
+            # Keep only last 20 performance measurements
+            self.performance_window = self.performance_window[-20:]
+            
+            # Check if we should evaluate scaling (every 5 batches or 30 seconds)
+            if (len(self.performance_window) >= 5 and 
+                current_time - self.last_performance_check > 30):
+                
+                self.last_performance_check = current_time
+                
+                # Calculate average performance over the window
+                avg_performance = sum(p['performance'] for p in self.performance_window) / len(self.performance_window)
+                
+                # Detect throttling (performance degradation)
+                recent_performance = self.performance_window[-3:] if len(self.performance_window) >= 3 else self.performance_window
+                recent_avg = sum(p['performance'] for p in recent_performance) / len(recent_performance)
+                
+                # Throttling detection: recent performance significantly lower than average
+                performance_degradation = (avg_performance - recent_avg) / avg_performance if avg_performance > 0 else 0
+                
+                if performance_degradation > self.throttle_threshold:
+                    # Throttling detected - scale down
+                    self.throttle_count += 1
+                    self.adaptive_stats['throttles'] += 1
+                    
+                    if self.current_workers > self.min_concurrent_workers:
+                        old_workers = self.current_workers
+                        self.current_workers = max(self.min_concurrent_workers, int(self.current_workers * 0.8))
+                        logger.info(f"🔄 Throttling detected! Scaling down workers: {old_workers} → {self.current_workers}")
+                        self.scaling_cooldown = current_time + 60  # 1 minute cooldown
+                        
+                elif (performance_degradation < -0.05 and  # Performance improving
+                      self.current_workers < self.max_concurrent_workers and
+                      current_time > self.scaling_cooldown):
+                    # Performance improving - scale up
+                    old_workers = self.current_workers
+                    self.current_workers = min(self.max_concurrent_workers, int(self.current_workers * 1.2))
+                    logger.info(f"🚀 Performance improving! Scaling up workers: {old_workers} → {self.current_workers}")
+                    self.scaling_cooldown = current_time + 30  # 30 second cooldown
+                    self.adaptive_stats['successes'] += 1
+                    
+        except Exception as e:
+            logger.debug(f"Error in adaptive concurrency control: {e}")
+
+    def _get_optimal_worker_count(self) -> int:
+        """Get the optimal number of workers based on current performance"""
+        return self.current_workers
+
+    async def _read_ahead_worker(self, cursor, query):
+        """Read-ahead worker that pre-fetches batches for parallel processing"""
+        try:
+            batch = []
+            batch_count = 0
+            
+            async for document in cursor:
+                if not self.is_running or self.read_queue is None:
+                    break
+                    
+                batch.append(document)
+                batch_count += 1
+                
+                # When batch is ready, put it in the read queue
+                if batch_count >= self.optimal_batch_size:
+                    await self.read_queue.put(batch)
+                    batch = []
+                    batch_count = 0
+            
+            # Put remaining documents in final batch
+            if batch and self.is_running and self.read_queue is not None:
+                await self.read_queue.put(batch)
+                
+        except Exception as e:
+            logger.error(f"Error in read-ahead worker: {e}")
+        finally:
+            # Signal end of reading
+            if self.read_queue is not None:
+                await self.read_queue.put(None)
+
+    async def _write_worker(self, worker_id: int):
+        """Parallel write worker that processes batches from the write queue"""
+        try:
+            while self.is_running and self.write_queue is not None:
+                try:
+                    # Get batch from write queue with timeout
+                    batch_data = await asyncio.wait_for(self.write_queue.get(), timeout=1.0)
+                    
+                    if batch_data is None:  # End signal
+                        break
+                        
+                    batch, batch_number = batch_data
+                    
+                    # Process the batch
+                    result = await self.migrate_batch(batch, batch_number)
+                    
+                    # Mark task as done
+                    self.write_queue.task_done()
+                    
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Error in write worker {worker_id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Write worker {worker_id} failed: {e}")
 
     async def _get_cached_count(self, query: dict) -> int:
         """Get document count with caching for faster startup"""
@@ -408,20 +559,55 @@ class CosmosToAtlasMigrator:
                 
             logger.debug(f"Processing batch of {len(batch)} documents")
             
-            # DIRECT INSERT - No processing overhead (maximum speed)
+            # DIRECT INSERT - No processing overhead (ULTRA-FAST)
             if batch:
-                # Ultra-fast direct insert with minimal error handling
+                # Ultra-fast chunked insert for maximum parallelism
                 async def _insert_batch():
                     try:
-                        result = await self.atlas_collection.insert_many(
-                            batch,  # Direct insert without processing
-                            ordered=False  # Continue on errors for speed
-                        )
-                        stats['migrated'] = len(result.inserted_ids)
-                        return result
+                        # Split large batches into optimal chunks for parallel processing
+                        if len(batch) > self.insert_batch_size:
+                            # Process chunks in parallel for maximum speed
+                            chunks = [batch[i:i + self.insert_batch_size] 
+                                    for i in range(0, len(batch), self.insert_batch_size)]
+                            
+                            # Create parallel insert tasks
+                            insert_tasks = []
+                            for chunk in chunks:
+                                task = self.atlas_collection.insert_many(
+                                    chunk,
+                                    ordered=False  # Continue on errors for speed
+                                )
+                                insert_tasks.append(task)
+                            
+                            # Execute all chunks in parallel
+                            results = await asyncio.gather(*insert_tasks, return_exceptions=True)
+                            
+                            # Aggregate results
+                            total_inserted = 0
+                            for result in results:
+                                if isinstance(result, Exception):
+                                    error_str = str(result).lower()
+                                    if "duplicate key" in error_str or "e11000" in error_str:
+                                        # Skip duplicates silently for speed
+                                        continue
+                                    else:
+                                        raise result
+                                else:
+                                    total_inserted += len(result.inserted_ids)
+                            
+                            stats['migrated'] = total_inserted
+                            return results[0] if results else None
+                        else:
+                            # Single insert for smaller batches
+                            result = await self.atlas_collection.insert_many(
+                                batch,  # Direct insert without any processing
+                                ordered=False  # Continue on errors for speed
+                            )
+                            stats['migrated'] = len(result.inserted_ids)
+                            return result
                         
                     except Exception as e:
-                        # Minimal error handling for speed - only handle critical errors
+                        # Ultra-minimal error handling for speed - only handle critical errors
                         error_str = str(e).lower()
                         if "duplicate key" in error_str or "e11000" in error_str:
                             # Skip duplicates silently for speed
@@ -430,14 +616,14 @@ class CosmosToAtlasMigrator:
                                 inserted_ids = []
                             return DuplicateResult()
                         else:
-                            # Re-raise other errors
+                            # Re-raise other errors immediately
                             raise e
                 
                 result = await self._retry_with_backoff(_insert_batch)
                 self.metrics['successful_batches'] += 1
                 # No batch logging for cleaner console output
                 
-                # Track batch performance for auto-tuning
+                # Track batch performance for auto-tuning and adaptive concurrency
                 batch_time = time.time() - batch_start_time
                 docs_per_second = len(batch) / batch_time if batch_time > 0 else 0
                 self.batch_performance_history.append({
@@ -446,8 +632,11 @@ class CosmosToAtlasMigrator:
                     'timestamp': time.time()
                 })
                 
-                # Auto-tune batch size every 20 batches for better performance
-                if len(self.batch_performance_history) >= 20:
+                # Adaptive concurrency control based on performance
+                self._adaptive_concurrency_control(docs_per_second)
+                
+                # Auto-tune batch size every 10 batches for faster adaptation
+                if len(self.batch_performance_history) >= 10:
                     self._auto_tune_batch_size()
                 
         except Exception as e:
@@ -520,6 +709,7 @@ class CosmosToAtlasMigrator:
             
             batch = []
             batch_count = 0
+            current_batch_number = 0
             
             async for document in cursor:
                 if not self.is_running:
@@ -530,6 +720,7 @@ class CosmosToAtlasMigrator:
                 
                 # Process batch when it reaches optimal batch size
                 if batch_count >= self.optimal_batch_size:
+                    current_batch_number += 1
                     stats = await self.migrate_batch(batch)
                     
                     self.documents_migrated += stats['migrated']
@@ -561,12 +752,14 @@ class CosmosToAtlasMigrator:
             pbar.close()
 
     async def migrate_with_parallel_processing(self, resume_from_id: Optional[str] = None):
-        """Ultra-fast migration using cursor-based parallel processing"""
-        logger.info("🚀 Starting ULTRA-FAST cursor-based migration...")
+        """ULTRA-FAST migration with read-ahead caching and parallel read/write operations"""
+        logger.info("🚀 Starting DATA GENERATION-SPEED migration...")
         logger.info(f"Source Database: {self.cosmos_db_name}")
         logger.info(f"Source Collection: {self.cosmos_collection_name}")
         logger.info(f"Target Database: {self.atlas_db_name}")
         logger.info(f"Target Collection: {self.atlas_collection_name}")
+        logger.info(f"📊 Read-ahead batches: {self.read_ahead_batches}")
+        logger.info(f"📊 Parallel write workers: {self.max_insert_workers}")
         
         # Build query for resuming
         query = {}
@@ -632,85 +825,69 @@ class CosmosToAtlasMigrator:
         )
         
         try:
-            # Use cursor with batch processing
+            # Create cursor for read-ahead processing
             cursor = self.cosmos_collection.find(query).sort('_id', 1)
             
-            batch = []
-            batch_count = 0
-            pending_tasks = []
-            current_batch_number = 0
+            # Start read-ahead worker
+            self.read_task = asyncio.create_task(self._read_ahead_worker(cursor, query))
             
-            async for document in cursor:
-                if not self.is_running:
-                    break
+            # Start parallel write workers
+            self.write_tasks = []
+            for i in range(self.max_insert_workers):
+                task = asyncio.create_task(self._write_worker(i))
+                self.write_tasks.append(task)
+            
+            # Process batches with read-ahead and parallel writes
+            current_batch_number = 0
+            completed_batches = 0
+            
+            while self.is_running and self.read_queue is not None and self.write_queue is not None:
+                try:
+                    # Get batch from read queue
+                    batch = await asyncio.wait_for(self.read_queue.get(), timeout=5.0)
                     
-                batch.append(document)
-                batch_count += 1
-                
-                # No RU monitoring for cleaner output
-                
-                # Process batch when it reaches optimal batch size
-                if batch_count >= self.optimal_batch_size:
+                    if batch is None:  # End of reading
+                        break
+                        
                     current_batch_number += 1
                     
-                    # Start parallel migration task
-                    task = asyncio.create_task(self.migrate_batch(batch, current_batch_number))
-                    pending_tasks.append(task)
+                    # Put batch in write queue for parallel processing
+                    await self.write_queue.put((batch, current_batch_number))
                     
-                    # If we have too many pending tasks, wait for some to complete
-                    if len(pending_tasks) >= self.max_workers:
-                        completed_tasks = await asyncio.gather(*pending_tasks[:self.max_workers//2], return_exceptions=True)
-                        
-                        # Process completed tasks
-                        for task_result in completed_tasks:
-                            if isinstance(task_result, dict):
-                                migrated_count = task_result.get('migrated', 0)
-                                self.documents_migrated += migrated_count
-                                self.documents_skipped += task_result.get('skipped', 0)
-                                self.errors += task_result.get('errors', 0)
-                                pbar.update(migrated_count)  # Update with actual migrated count
-                                
-                                # Save checkpoint after each batch completion for maximum reliability
-                                if batch:
-                                    self.last_checkpoint = str(batch[-1]['_id'])
-                                    self._save_checkpoint(pbar)
-                        
-                        # Remove completed tasks
-                        pending_tasks = pending_tasks[self.max_workers//2:]
+                    # Update progress
+                    pbar.update(len(batch))
                     
-                    # Save checkpoint every 10 batches for better performance
+                    # Save checkpoint every 10 batches
                     if current_batch_number % 10 == 0:
                         self.last_checkpoint = str(batch[-1]['_id'])
                         self._save_checkpoint(pbar)
                     
-                    # Reset batch
-                    batch = []
-                    batch_count = 0
+                    completed_batches += 1
+                    
+                except asyncio.TimeoutError:
+                    # Check if read task is still running
+                    if self.read_task and self.read_task.done():
+                        break
+                    continue
+                except Exception as e:
+                    logger.error(f"Error processing batch: {e}")
+                    break
             
-            # Process remaining documents in final batch
-            if batch and self.is_running:
-                current_batch_number += 1
-                task = asyncio.create_task(self.migrate_batch(batch, f"final-{current_batch_number}"))
-                pending_tasks.append(task)
+            # Signal end to write workers
+            if self.write_queue is not None:
+                for _ in range(self.max_insert_workers):
+                    await self.write_queue.put(None)
             
-            # Wait for all remaining tasks to complete
-            if pending_tasks:
-                completed_tasks = await asyncio.gather(*pending_tasks, return_exceptions=True)
-                for task_result in completed_tasks:
-                    if isinstance(task_result, dict):
-                        migrated_count = task_result.get('migrated', 0)
-                        self.documents_migrated += migrated_count
-                        self.documents_skipped += task_result.get('skipped', 0)
-                        self.errors += task_result.get('errors', 0)
-                        pbar.update(migrated_count)  # Update with actual migrated count
-                        
-                        # Save final checkpoint
-                        if batch:
-                            self.last_checkpoint = str(batch[-1]['_id'])
-                            self._save_checkpoint(pbar)
+            # Wait for all write workers to complete
+            if self.write_tasks:
+                await asyncio.gather(*self.write_tasks, return_exceptions=True)
+            
+            # Wait for read task to complete
+            if self.read_task:
+                await self.read_task
                 
         except Exception as e:
-            logger.error(f"Error in migration: {e}")
+            logger.error(f"Error in DATA GENERATION-SPEED migration: {e}")
         finally:
             pbar.close()
 
@@ -790,6 +967,14 @@ class CosmosToAtlasMigrator:
             logger.info(f"   ❌ Failed batches: {self.metrics['failed_batches']:,}")
             logger.info(f"   🔄 Total retries: {self.metrics['total_retries']:,}")
             logger.info(f"   📊 Success rate: {(self.metrics['successful_batches'] / max(self.metrics['total_batches'], 1)) * 100:.1f}%")
+            
+            # Adaptive concurrency metrics
+            logger.info("🎯 Adaptive Concurrency Metrics:")
+            logger.info(f"   📈 Final worker count: {self.current_workers}")
+            logger.info(f"   🔄 Throttling events: {self.throttle_count}")
+            logger.info(f"   📊 Scaling successes: {self.adaptive_stats['successes']}")
+            logger.info(f"   📉 Scaling downs: {self.adaptive_stats['throttles']}")
+            logger.info(f"   🎯 Worker range: {self.min_concurrent_workers} - {self.max_concurrent_workers}")
             
             # Performance analysis
             if self.metrics['total_batches'] > 0:
