@@ -1,16 +1,19 @@
-# 🚀 Volvo Service Orders Data Migration Project
+# 🚀 Volvo Data Framework
 
-A high-performance solution for migrating Volvo service orders data from Azure Cosmos DB (MongoDB API) to MongoDB Atlas, with optimized data generation and migration tools.
+## Enterprise-Ready Data Generation and Migration Solution
+
+A comprehensive, enterprise-ready framework for data generation and migration operations, specifically designed for Volvo service orders data. Built with modularity, scalability, and maintainability in mind.
 
 ## 🎯 Project Purpose
 
 This project provides a complete data migration solution for Volvo service orders, designed to handle large-scale data operations (60M+ documents) with maximum speed and reliability. It includes:
 
-- **Realistic Data Generation**: Creates authentic Volvo service order data with proper relationships
-- **High-Performance Migration**: Optimized for maximum speed with parallel processing
-- **Resumable Operations**: Checkpoint-based migration that can resume from interruptions
-- **Real-time Monitoring**: Track progress with detailed performance metrics
-- **Error Handling**: Robust error handling and retry mechanisms
+- **🏗️ Modular Framework**: Pluggable components for easy customization and extension
+- **⚡ High-Performance Migration**: Optimized for maximum speed with parallel processing
+- **🔄 Resumable Operations**: Checkpoint-based migration that can resume from interruptions
+- **📊 Real-time Monitoring**: Track progress with detailed performance metrics
+- **🛡️ Enterprise Ready**: Error handling, logging, and configuration management
+- **🔧 Extensible**: Easy to add new generators and migration strategies
 
 ## 🚀 Key Features
 
@@ -19,6 +22,8 @@ This project provides a complete data migration solution for Volvo service order
 - 📊 **Real-time Progress**: Live progress bars with RU consumption and performance metrics
 - 🛡️ **Error Recovery**: Intelligent retry logic with exponential backoff
 - 🎯 **Production Ready**: Handles 60M+ documents with optimized settings
+- 🏗️ **Modular Architecture**: Clean separation of concerns with pluggable components
+- 🔧 **Framework-Based**: Reusable components for different data types and migration scenarios
 
 ## 📋 Prerequisites
 
@@ -145,27 +150,47 @@ The project uses a secure environment variable setup:
 
 ```
 volvo-vida/
-├── 📄 Core Scripts
-│   ├── data_generator.py         # High-speed data generation
-│   ├── migrate_to_atlas.py       # Optimized migration script
-│   ├── models.py                 # Data models and generators
-│   ├── mongodb_compatibility.py  # Compatibility layer
-│   └── test_connection.py        # Connection testing
+├── 🏗️ Framework Core
+│   ├── framework/
+│   │   ├── core/                 # Core database operations
+│   │   │   └── database.py      # Base database clients
+│   │   ├── config/              # Configuration management
+│   │   │   └── manager.py       # Configuration system
+│   │   ├── generators/          # Data generation framework
+│   │   │   ├── engine.py        # Generation engine
+│   │   │   ├── factory.py       # Generator factory
+│   │   │   └── json_sample_generator.py # JSON-based generator
+│   │   ├── migrations/          # Migration framework
+│   │   │   ├── engine.py        # Migration engine
+│   │   │   ├── factory.py       # Strategy factory
+│   │   │   └── default_strategy.py # Default migration strategy
+│   │   └── monitoring/          # Monitoring and metrics
+│   │       └── metrics.py       # Metrics collection
+│   │
+│   ├── user_defined/            # User-specific implementations
+│   │   ├── generators/          # Custom data generators
+│   │   │   └── volvo_generator.py # Volvo service order generator
+│   │   ├── strategies/          # Custom migration strategies
+│   │   │   └── volvo_strategy.py # Volvo migration strategy
+│   │   └── templates/           # JSON templates for generation
+│   │       └── service_order_template.json
+│   │
+│   ├── flexible_migrate.py      # Main migration script
+│   └── flexible_generator.py    # Main data generation script
 │
 ├── 🔧 Utility Scripts
-│   ├── extract_indexes_only.py   # Extract indexes from Cosmos DB
-│   ├── extract_and_create_indexes.py # Create indexes on Atlas
-│   ├── dump_cosmos.sh            # Cosmos DB dump script
-│   └── restore_to_atlas.sh       # Atlas restore script
+│   ├── dump_cosmos.sh           # Cosmos DB dump script
+│   └── test_connection.py       # Connection testing
 │
 ├── ⚙️ Configuration
-│   ├── .env_local                # Your credentials (not tracked)
-│   ├── .env_local.example        # Template for developers
-│   ├── config.env                # Example values
-│   └── requirements.txt          # Python dependencies
+│   ├── .env_local               # Your credentials (not tracked)
+│   ├── .env_local.example       # Template for developers
+│   └── requirements.txt         # Python dependencies
 │
 └── 📚 Documentation
-    └── README.md                 # This file
+    ├── README.md                # This file
+    ├── FRAMEWORK_README.md      # Framework documentation
+    └── CUSTOM_STRATEGIES_GUIDE.md # Custom strategy guide
 ```
 
 ## 🚀 Usage Examples
@@ -173,32 +198,38 @@ volvo-vida/
 ### Data Generation
 
 ```bash
-# Generate documents using GEN_TOTAL_DOCUMENTS setting
-python data_generator.py
+# Generate documents using framework
+python flexible_generator.py --generator user_defined/generators/volvo_generator.py
 
 # Generate specific amount
 export GEN_TOTAL_DOCUMENTS=1000000
-python data_generator.py
+python flexible_generator.py --generator user_defined/generators/volvo_generator.py
 ```
 
 ### Migration
 
 ```bash
 # Full migration with checkpoint support
-python migrate_to_atlas.py
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 
 # Resume from checkpoint (automatic)
-python migrate_to_atlas.py
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
+
+# Force start from beginning
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --force-from-start
+
+# Disable indexes for optimal performance
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
 ```
 
 ### Index Management
 
 ```bash
-# Extract indexes from Cosmos DB
-python extract_indexes_only.py
+# Create indexes from source database
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --create-indexes
 
-# Create indexes on Atlas
-python extract_and_create_indexes.py
+# Disable indexes for optimal performance during migration
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
 ```
 
 ## 📈 Monitoring and Progress
@@ -284,10 +315,13 @@ print(f"Migration Complete: {cosmos_count == atlas_count}")
 - **Test with smaller datasets** before full migration
 
 ### Security
-- **Never commit credentials** to version control
-- **Use `.env_local`** for sensitive data
-- **Rotate credentials** after migration
-- **Monitor access logs** for security
+
+- **🔐 Never commit credentials** to version control
+- **📁 Use `.env_local`** for sensitive data (not tracked by git)
+- **🚫 Avoid hardcoded secrets** in scripts
+- **🔄 Rotate credentials** regularly
+- **📋 Use `.env_local.example`** as a template for team members
+- **⚠️ Files with secrets have been removed** from git history for security
 
 ## 📞 Support and Troubleshooting
 

@@ -2,7 +2,7 @@
 
 ## Enterprise-Ready Data Generation and Migration Framework
 
-The Volvo Data Framework is a comprehensive, enterprise-ready solution for data generation and migration operations. Built with modularity, scalability, and maintainability in mind, it provides a robust foundation for handling large-scale data operations.
+The Volvo Data Framework is a comprehensive, enterprise-ready solution for data generation and migration operations. Built with modularity, scalability, and maintainability in mind, it provides a robust foundation for handling large-scale data operations with maximum performance and reliability.
 
 ## 🎯 Key Features
 
@@ -13,24 +13,34 @@ The Volvo Data Framework is a comprehensive, enterprise-ready solution for data 
 - **🛡️ Enterprise Ready**: Error handling, logging, and configuration management
 - **🔧 Extensible**: Easy to add new generators and migration strategies
 - **📈 Scalable**: Configurable workers and batch processing
+- **🔐 Security First**: No hardcoded secrets, environment-based configuration
 
 ## 🏗️ Architecture Overview
 
 ```
 framework/
 ├── core/                    # Core database operations
-│   └── database.py         # Base database clients
+│   └── database.py         # Base database clients (CosmosDB, Atlas)
 ├── config/                 # Configuration management
-│   └── manager.py         # Configuration system
+│   └── manager.py         # Configuration system with environment variables
 ├── generators/             # Data generation framework
 │   ├── engine.py          # Generation engine
-│   └── volvo_generator.py # Volvo-specific generator
+│   ├── factory.py         # Generator factory
+│   └── json_sample_generator.py # JSON-based generator
 ├── migrations/             # Migration framework
-│   ├── engine.py          # Migration engine
-│   └── volvo_strategy.py  # Volvo-specific strategy
-├── monitoring/             # Monitoring and metrics
-│   └── metrics.py         # Metrics collection
-└── utils/                  # Utility functions
+│   ├── engine.py          # Migration engine with checkpoint support
+│   ├── factory.py         # Strategy factory
+│   └── default_strategy.py # Default migration strategy
+└── monitoring/             # Monitoring and metrics
+    └── metrics.py         # Metrics collection and performance tracking
+
+user_defined/               # User-specific implementations
+├── generators/             # Custom data generators
+│   └── volvo_generator.py # Volvo service order generator
+├── strategies/             # Custom migration strategies
+│   └── volvo_strategy.py  # Volvo migration strategy
+└── templates/              # JSON templates for generation
+    └── service_order_template.json
 ```
 
 ## 🚀 Quick Start
@@ -339,19 +349,25 @@ The framework provides comprehensive error handling:
 
 ## 🔒 Security
 
-- **Environment variables**: Sensitive data in environment variables
-- **Connection strings**: Secure connection string handling
-- **Logging**: No sensitive data in logs
-- **Validation**: Input validation and sanitization
+- **🔐 Environment Variables**: All sensitive data stored in environment variables
+- **📁 .env_local**: Local configuration file (not tracked by git)
+- **🚫 No Hardcoded Secrets**: Framework designed to prevent credential exposure
+- **🔄 Connection Strings**: Secure connection string handling with proper escaping
+- **📋 Logging**: No sensitive data logged, sanitized output
+- **✅ Input Validation**: Comprehensive input validation and sanitization
+- **⚠️ Git History**: Files with secrets have been removed from git history
+- **🛡️ Best Practices**: Follows enterprise security standards
 
 ## 📈 Performance Benchmarks
 
 Typical performance with optimized settings:
 
-- **Data Generation**: 15,000-25,000 documents/second
-- **Migration**: 8,000-15,000 documents/second
+- **Data Generation**: 10,000-20,000 documents/second
+- **Migration**: 4,000-8,000 documents/second (conservative settings)
 - **Memory Usage**: < 1GB for 1M documents
 - **CPU Usage**: < 80% on modern hardware
+- **Connection Pool**: Conservative settings prevent broken pipe errors
+- **Batch Size**: 15,000 documents per batch (optimal for stability)
 
 ## 🤝 Contributing
 
