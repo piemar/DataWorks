@@ -38,7 +38,9 @@ git clone <repository-url>
 cd volvo-vida
 
 # Install dependencies
-pip install -r requirements.txt
+python3 -m venv venv
+source venv/bin/activate
+pip3 install -r requirements.txt
 ```
 
 ### 2. Configure Environment
