@@ -5,10 +5,12 @@ Enterprise-ready data migration with parallel processing, checkpointing, and mon
 import asyncio
 import logging
 import time
+import sys
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
+from collections import deque
 
 from tqdm import tqdm
 
@@ -17,6 +19,38 @@ from ..config.manager import FrameworkConfig, MigrationConfig
 from ..monitoring.metrics import MetricsCollector, OperationType
 
 logger = logging.getLogger(__name__)
+
+class ProgressBarLogHandler(logging.Handler):
+    """Custom logging handler that displays logs below progress bar"""
+    
+    def __init__(self, pbar, max_messages=5):
+        super().__init__()
+        self.pbar = pbar
+        self.max_messages = max_messages
+        self.message_buffer = deque(maxlen=max_messages)
+        self.original_stream = None
+        
+    def emit(self, record):
+        """Emit a log record"""
+        try:
+            # Format the log message
+            msg = self.format(record)
+            
+            # Add to buffer
+            self.message_buffer.append(msg)
+            
+            # Update progress bar postfix with latest messages
+            if self.message_buffer:
+                # Join last few messages with newlines
+                latest_messages = '\n'.join(list(self.message_buffer)[-3:])  # Show last 3 messages
+                self.pbar.set_postfix_str(f"\n{latest_messages}")
+                
+        except Exception:
+            pass  # Ignore logging errors to avoid performance impact
+    
+    def flush(self):
+        """Flush the handler"""
+        pass
 
 class MigrationStrategy(Enum):
     """Migration strategies"""
@@ -195,6 +229,13 @@ class MigrationEngine:
         # Get total document count for progress bar
         total_docs = await self.source_client.get_estimated_count()
         
+        # Seed progress with already migrated docs in target (estimated)
+        try:
+            migrated_so_far = await self.target_client.get_estimated_count()
+        except Exception:
+            migrated_so_far = 0
+        self.migration_strategy.documents_migrated = migrated_so_far
+        
         # Create progress bar
         pbar = tqdm(
             total=total_docs,
@@ -207,8 +248,21 @@ class MigrationEngine:
             smoothing=self.config.performance.progress_smoothing,
             miniters=self.config.performance.progress_miniters,
             dynamic_ncols=True,
-            leave=True
+            leave=True,
+            initial=migrated_so_far,
+            position=0,  # Ensure progress bar is at top
+            file=sys.stdout
         )
+        
+        # Set up custom logging handler to show logs below progress bar
+        log_handler = ProgressBarLogHandler(pbar, max_messages=5)
+        log_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        log_handler.setFormatter(formatter)
+        
+        # Add handler to root logger to catch all migration-related logs
+        root_logger = logging.getLogger()
+        root_logger.addHandler(log_handler)
         
         try:
             # Migration loop
@@ -258,6 +312,10 @@ class MigrationEngine:
             logger.error(f"Error during migration: {e}")
             raise
         finally:
+            # Clean up logging handler
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(log_handler)
+            
             pbar.close()
             self.is_running = False
         
