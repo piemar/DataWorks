@@ -90,7 +90,7 @@ async def create_indexes_from_source(source_client, target_client, config):
         logger.error(f"❌ Failed to create indexes: {e}")
         raise
 
-async def hide_indexes(target_client, config):
+async def hide_indexes(target_client, config, preserve_created_indexes=False):
     """Temporarily hide indexes for better migration performance"""
     try:
         target_collection = target_client.collection
@@ -118,7 +118,8 @@ async def hide_indexes(target_client, config):
                     'name': index_info['name'],
                     'key': index_info['key'],
                     'options': {k: v for k, v in index_info.items() 
-                              if k not in ['name', 'key', 'v']}
+                              if k not in ['name', 'key', 'v']},
+                    'created_during_migration': preserve_created_indexes
                 })
                 
                 logger.debug(f"   ⚡ Hidden index: {index_info['name']}")
@@ -132,7 +133,8 @@ async def hide_indexes(target_client, config):
             await temp_collection.insert_one({
                 'collection_name': config.target_database.collection_name,
                 'hidden_indexes': hidden_indexes,
-                'hidden_at': datetime.utcnow().isoformat()
+                'hidden_at': datetime.utcnow().isoformat(),
+                'created_during_migration': preserve_created_indexes
             })
         
         logger.info(f"⚡ Successfully hidden {len(hidden_indexes)} indexes")
@@ -157,7 +159,12 @@ async def restore_indexes(target_client, config):
             return
         
         hidden_indexes = hidden_record['hidden_indexes']
-        logger.info(f"   🔄 Restoring {len(hidden_indexes)} indexes")
+        created_during_migration = hidden_record.get('created_during_migration', False)
+        
+        if created_during_migration:
+            logger.info(f"   🔄 Restoring {len(hidden_indexes)} indexes (created during migration)")
+        else:
+            logger.info(f"   🔄 Restoring {len(hidden_indexes)} indexes")
         
         restored_count = 0
         
@@ -173,7 +180,10 @@ async def restore_indexes(target_client, config):
                     **index_options
                 )
                 
-                logger.debug(f"   ✅ Restored index: {index_info['name']}")
+                if created_during_migration:
+                    logger.info(f"   ✅ Restored index: {index_info['name']} (created from source)")
+                else:
+                    logger.debug(f"   ✅ Restored index: {index_info['name']}")
                 restored_count += 1
                 
             except Exception as e:
@@ -182,7 +192,10 @@ async def restore_indexes(target_client, config):
         # Clean up the temporary record
         await temp_collection.delete_one({'_id': hidden_record['_id']})
         
-        logger.info(f"🔄 Successfully restored {restored_count} indexes")
+        if created_during_migration:
+            logger.info(f"🔄 Successfully restored {restored_count} indexes (created from source database)")
+        else:
+            logger.info(f"🔄 Successfully restored {restored_count} indexes")
         
     except Exception as e:
         logger.error(f"❌ Failed to restore indexes: {e}")
@@ -273,11 +286,11 @@ async def main():
         # ALWAYS disable indexes before migration for maximum performance
         if args.disable_indexes:
             logger.info("⚡ Temporarily hiding indexes for better migration performance...")
-            await hide_indexes(engine.target_client, config)
+            await hide_indexes(engine.target_client, config, preserve_created_indexes=args.create_indexes)
         else:
             # Even if not explicitly requested, disable indexes for better performance
             logger.info("⚡ Auto-disabling indexes for optimal migration performance...")
-            await hide_indexes(engine.target_client, config)
+            await hide_indexes(engine.target_client, config, preserve_created_indexes=args.create_indexes)
         
         # Create strategy using factory
         factory = MigrationStrategyFactory()
