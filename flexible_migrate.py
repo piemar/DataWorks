@@ -208,7 +208,7 @@ async def main():
     parser.add_argument('--create-indexes', action='store_true',
                        help='Create indexes from source database in target database before migration')
     parser.add_argument('--disable-indexes', action='store_true',
-                       help='Temporarily hide indexes during migration for better performance')
+                       help='Explicitly disable indexes during migration (indexes are auto-disabled for optimal performance)')
     
     args = parser.parse_args()
     
@@ -237,8 +237,8 @@ async def main():
             print("   python flexible_migrate.py --strategy strategies/examples/hello_world_strategy.py")
             print("   python flexible_migrate.py --strategy strategies/examples/advanced_strategy.py --validation --enrichment")
             print("   python flexible_migrate.py --strategy default --create-indexes")
-            print("   python flexible_migrate.py --strategy default --disable-indexes")
-            print("   python flexible_migrate.py --strategy default --create-indexes --disable-indexes")
+            print("   # Note: Indexes are automatically disabled for optimal performance")
+            print("   # Use --disable-indexes only to explicitly control this behavior")
             
             return 0
         
@@ -265,13 +265,18 @@ async def main():
             logger.error("Failed to initialize migration engine")
             return 1
         
-        # Handle index operations
+        # Handle index operations BEFORE migration starts
         if args.create_indexes:
             logger.info("🔧 Creating indexes from source database...")
             await create_indexes_from_source(engine.source_client, engine.target_client, config)
         
+        # ALWAYS disable indexes before migration for maximum performance
         if args.disable_indexes:
             logger.info("⚡ Temporarily hiding indexes for better migration performance...")
+            await hide_indexes(engine.target_client, config)
+        else:
+            # Even if not explicitly requested, disable indexes for better performance
+            logger.info("⚡ Auto-disabling indexes for optimal migration performance...")
             await hide_indexes(engine.target_client, config)
         
         # Create strategy using factory
@@ -324,10 +329,9 @@ async def main():
                 logger.info(f"   • Resume field: {metrics.get('resume_field', 'unknown')}")
                 logger.info(f"   • Transform enabled: {metrics.get('transform_enabled', False)}")
         
-        # Restore indexes if they were disabled
-        if args.disable_indexes:
-            logger.info("🔄 Restoring indexes after migration...")
-            await restore_indexes(engine.target_client, config)
+        # ALWAYS restore indexes after migration completion
+        logger.info("🔄 Restoring indexes after migration...")
+        await restore_indexes(engine.target_client, config)
         
         return 0
         
