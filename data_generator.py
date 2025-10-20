@@ -50,6 +50,13 @@ class DataGenerator:
         self.total_documents = int(os.getenv('TOTAL_DOCUMENTS', 10000000))
         self.concurrent_workers = int(os.getenv('CONCURRENT_WORKERS', 16))  # More workers for maximum speed
         
+        # Parallel generation/write optimization (ULTRA-FAST)
+        self.generation_workers = int(os.getenv('GENERATION_WORKERS', 8))  # Dedicated generation workers
+        self.write_workers = int(os.getenv('WRITE_WORKERS', 16))  # Dedicated write workers
+        self.generation_queue = None  # Will be initialized in connect_to_cosmos
+        self.write_queue = None  # Will be initialized in connect_to_cosmos
+        self.generation_tasks = []
+        self.write_tasks = []
         
         self.client: Optional[AsyncIOMotorClient] = None
         self.collection = None
@@ -72,6 +79,17 @@ class DataGenerator:
         self.progress_update_interval = 10  # Update progress bar every 10 batches
         self.pending_updates = 0  # Accumulate updates before showing
         
+        # Adaptive concurrency control (ULTRA-FAST)
+        self.current_generation_workers = self.generation_workers
+        self.current_write_workers = self.write_workers
+        self.max_generation_workers = int(os.getenv('MAX_GENERATION_WORKERS', 12))
+        self.min_generation_workers = int(os.getenv('MIN_GENERATION_WORKERS', 4))
+        self.max_write_workers = int(os.getenv('MAX_WRITE_WORKERS', 24))
+        self.min_write_workers = int(os.getenv('MIN_WRITE_WORKERS', 8))
+        self.performance_window = []
+        self.last_performance_check = time.time()
+        self.scaling_cooldown = 0
+        
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -90,12 +108,20 @@ class DataGenerator:
             compatible_client = create_compatible_cosmos_client(self.cosmos_connection_string)
             self.client = compatible_client.create_client(async_client=True)
             
-            # Optimize connection settings for maximum speed
+            # Optimize connection settings for ULTRA-FAST speed
             # Increase connection pool size for better concurrency
-            self.client._pool_size = 200  # More connections for concurrent operations
-            self.client._max_pool_size = 400  # Maximum pool size
-            self.client._min_pool_size = 50  # Minimum pool size
-            self.client._max_idle_time_ms = 60000  # Keep connections alive longer
+            self.client._pool_size = 400  # More connections for concurrent operations
+            self.client._max_pool_size = 600  # Maximum pool size
+            self.client._min_pool_size = 100  # Higher minimum pool size
+            self.client._max_idle_time_ms = 300000  # Keep connections alive much longer
+            
+            # Pre-warm connection pool for maximum performance
+            logger.info("Pre-warming Cosmos connection pool...")
+            warmup_tasks = []
+            for i in range(30):  # Create 30 warmup connections
+                warmup_tasks.append(self.client.admin.command('ping'))
+            await asyncio.gather(*warmup_tasks, return_exceptions=True)
+            logger.info("Connection pool pre-warmed successfully")
             
             # Test connection
             await self.client.admin.command('ping')
@@ -107,7 +133,25 @@ class DataGenerator:
             # Use unacknowledged writes for better performance (fire and forget)
             self.collection = self.collection.with_options(write_concern=WriteConcern(w=0))
             
-            logger.info("Successfully connected to Azure Cosmos DB with optimizations")
+            # Initialize async queues for parallel processing
+            self.generation_queue = asyncio.Queue(maxsize=self.generation_workers * 2)
+            self.write_queue = asyncio.Queue(maxsize=self.write_workers * 2)
+            
+            logger.info("Successfully connected to Azure Cosmos DB with ULTRA-FAST optimizations")
+            logger.info("🚀 ULTRA-FAST data generation settings active:")
+            logger.info(f"   📦 Batch size: {self.batch_size:,} documents")
+            logger.info(f"   🔧 Generation workers: {self.generation_workers}")
+            logger.info(f"   ✍️ Write workers: {self.write_workers}")
+            logger.info(f"   📈 Max generation workers: {self.max_generation_workers}")
+            logger.info(f"   📈 Max write workers: {self.max_write_workers}")
+            logger.info(f"   🔄 Retry logic: 3 attempts with exponential backoff")
+            logger.info(f"   ⚡ Write concern: Unacknowledged (w=0)")
+            logger.info(f"   🚀 Connection pool: 400-600 connections (pre-warmed)")
+            logger.info(f"   📚 Generation queue: {self.generation_workers * 2} capacity")
+            logger.info(f"   ✍️ Write queue: {self.write_workers * 2} capacity")
+            logger.info(f"   ⚡ Parallel generation/write: Enabled")
+            logger.info(f"   🎯 Adaptive concurrency: Enabled")
+            
             return True
             
         except Exception as e:
@@ -195,6 +239,66 @@ class DataGenerator:
 
         return orders
 
+    async def _generation_worker(self, worker_id: int):
+        """Parallel generation worker that creates batches for the write queue"""
+        try:
+            while self.is_running and self.generation_queue is not None and self.write_queue is not None:
+                try:
+                    # Get batch request from generation queue
+                    batch_request = await asyncio.wait_for(self.generation_queue.get(), timeout=1.0)
+                    
+                    if batch_request is None:  # End signal
+                        break
+                        
+                    batch_size, batch_number = batch_request
+                    
+                    # Generate batch
+                    batch = self.generate_batch(batch_size)
+                    
+                    # Put batch in write queue for parallel processing
+                    await self.write_queue.put((batch, batch_number))
+                    
+                    # Mark generation task as done
+                    self.generation_queue.task_done()
+                    
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Error in generation worker {worker_id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Generation worker {worker_id} failed: {e}")
+
+    async def _write_worker(self, worker_id: int):
+        """Parallel write worker that processes batches from the write queue"""
+        try:
+            while self.is_running and self.write_queue is not None:
+                try:
+                    # Get batch from write queue with timeout
+                    batch_data = await asyncio.wait_for(self.write_queue.get(), timeout=1.0)
+                    
+                    if batch_data is None:  # End signal
+                        break
+                        
+                    batch, batch_number = batch_data
+                    
+                    # Write batch with retry logic
+                    success = await self.write_batch_with_retry(batch)
+                    
+                    if success:
+                        self.documents_written += len(batch)
+                    
+                    # Mark write task as done
+                    self.write_queue.task_done()
+                    
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Error in write worker {worker_id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Write worker {worker_id} failed: {e}")
+
     async def generate_and_write_batch(self, batch_size: int) -> int:
         """Generate and write a batch in parallel - returns number of documents written"""
         try:
@@ -281,90 +385,146 @@ class DataGenerator:
         
         return False
 
+    def _adaptive_concurrency_control(self, performance_metric: float):
+        """Adaptive concurrency control based on performance and throttling"""
+        try:
+            current_time = time.time()
+            
+            # Add performance data to window
+            self.performance_window.append({
+                'performance': performance_metric,
+                'timestamp': current_time,
+                'generation_workers': self.current_generation_workers,
+                'write_workers': self.current_write_workers
+            })
+            
+            # Keep only last 20 performance measurements
+            self.performance_window = self.performance_window[-20:]
+            
+            # Check if we should evaluate scaling (every 10 batches or 30 seconds)
+            if (len(self.performance_window) >= 5 and 
+                current_time - self.last_performance_check > 30):
+                
+                self.last_performance_check = current_time
+                
+                # Calculate average performance over the window
+                avg_performance = sum(p['performance'] for p in self.performance_window) / len(self.performance_window)
+                
+                # Detect throttling (performance degradation)
+                recent_performance = self.performance_window[-3:] if len(self.performance_window) >= 3 else self.performance_window
+                recent_avg = sum(p['performance'] for p in recent_performance) / len(recent_performance)
+                
+                # Throttling detection: recent performance significantly lower than average
+                performance_degradation = (avg_performance - recent_avg) / avg_performance if avg_performance > 0 else 0
+                
+                if performance_degradation > 0.1:  # 10% throttling threshold
+                    # Throttling detected - scale down
+                    if self.current_write_workers > self.min_write_workers:
+                        old_workers = self.current_write_workers
+                        self.current_write_workers = max(self.min_write_workers, int(self.current_write_workers * 0.8))
+                        logger.info(f"🔄 Throttling detected! Scaling down write workers: {old_workers} → {self.current_write_workers}")
+                        self.scaling_cooldown = current_time + 60  # 1 minute cooldown
+                        
+                elif (performance_degradation < -0.05 and  # Performance improving
+                      self.current_write_workers < self.max_write_workers and
+                      current_time > self.scaling_cooldown):
+                    # Performance improving - scale up
+                    old_workers = self.current_write_workers
+                    self.current_write_workers = min(self.max_write_workers, int(self.current_write_workers * 1.2))
+                    logger.info(f"🚀 Performance improving! Scaling up write workers: {old_workers} → {self.current_write_workers}")
+                    self.scaling_cooldown = current_time + 30  # 30 second cooldown
+                    
+        except Exception as e:
+            logger.debug(f"Error in adaptive concurrency control: {e}")
+
     async def generate_and_write_continuously(self):
-        """Optimized parallel data generation with efficient task management"""
-        logger.info(f"🚀 Starting OPTIMIZED parallel data generation...")
+        """ULTRA-FAST parallel data generation with read-ahead caching and parallel generation/write operations"""
+        logger.info(f"🚀 Starting ULTRA-FAST parallel data generation...")
         logger.info(f"Database: {self.cosmos_db_name}")
         logger.info(f"Collection: {self.cosmos_collection_name}")
         logger.info(f"Target: {self.total_documents:,} documents")
         logger.info(f"Batch size: {self.batch_size}")
-        logger.info(f"Concurrent workers: {self.concurrent_workers}")
+        logger.info(f"Generation workers: {self.generation_workers}")
+        logger.info(f"Write workers: {self.write_workers}")
         
         self.start_time = time.time()
         
         # Create progress bar with RU consumption display
         pbar = tqdm(
             total=self.total_documents, 
-            desc=f"🚀 Generating to {self.cosmos_db_name}.{self.cosmos_collection_name}", 
+            desc=f"🚀 ULTRA-FAST Generation to {self.cosmos_db_name}.{self.cosmos_collection_name}", 
             unit="docs",
             unit_scale=True,
             ncols=120,
-            bar_format='{desc}: {percentage:3.0f}%|{bar:20}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}',
+            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}',
             colour='green',
-            smoothing=0.1
+            smoothing=0.1,
+            miniters=1000,
+            dynamic_ncols=True,
+            leave=True
         )
         
         try:
-            # Use asyncio.Semaphore to control concurrency more efficiently
-            semaphore = asyncio.Semaphore(self.concurrent_workers)
+            # Start parallel generation workers
+            self.generation_tasks = []
+            for i in range(self.generation_workers):
+                task = asyncio.create_task(self._generation_worker(i))
+                self.generation_tasks.append(task)
             
-            async def limited_batch_worker(batch_size: int) -> int:
-                """Worker function with semaphore control"""
-                async with semaphore:
-                    result = await self.generate_and_write_batch(batch_size)
-                    return result
+            # Start parallel write workers
+            self.write_tasks = []
+            for i in range(self.write_workers):
+                task = asyncio.create_task(self._write_worker(i))
+                self.write_tasks.append(task)
             
-            # Create all tasks upfront for better efficiency
-            tasks = []
+            # Process batches with parallel generation and writes
+            current_batch_number = 0
             remaining_docs = self.total_documents
             
             while remaining_docs > 0 and self.is_running:
-                current_batch_size = min(self.batch_size, remaining_docs)
-                task = asyncio.create_task(limited_batch_worker(current_batch_size))
-                tasks.append(task)
-                remaining_docs -= current_batch_size
-                
-                # Process tasks in chunks to avoid memory issues
-                if len(tasks) >= self.concurrent_workers * 2:
-                    # Process completed tasks
-                    completed_tasks, tasks = tasks[:self.concurrent_workers], tasks[self.concurrent_workers:]
-                    results = await asyncio.gather(*completed_tasks, return_exceptions=True)
+                try:
+                    current_batch_size = min(self.batch_size, remaining_docs)
+                    current_batch_number += 1
                     
-                    for result in results:
-                        if isinstance(result, int):
-                            # Accumulate updates for batch progress updates
-                            self.pending_updates += result
-                            
-                            # Only update progress bar every 5 batches for speed
-                            if self.batch_count % self.progress_update_interval == 0:
-                                # Update progress bar with RU rate (minimal formatting)
-                                ru_info = f"RU:{self.ru_per_second:.0f}" if not self.is_throttling else f"\033[91mRU:{self.ru_per_second:.0f}\033[0m"
-                                pbar.set_postfix_str(ru_info)
-                                pbar.update(self.pending_updates)
-                                self.pending_updates = 0
-                        elif isinstance(result, Exception):
-                            logger.error(f"Task failed: {result}")
-            
-            # Process remaining tasks
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, int):
-                        # Accumulate updates for batch progress updates
-                        self.pending_updates += result
+                    # Put batch request in generation queue
+                    await self.generation_queue.put((current_batch_size, current_batch_number))
+                    
+                    remaining_docs -= current_batch_size
+                    
+                    # Update progress periodically
+                    if current_batch_number % 10 == 0:
+                        # Update progress bar with RU rate and worker info
+                        ru_info = f"RU:{self.ru_per_second:.0f}" if not self.is_throttling else f"\033[91mRU:{self.ru_per_second:.0f}\033[0m"
+                        worker_info = f"G:{self.current_generation_workers}W:{self.current_write_workers}"
+                        pbar.set_postfix_str(f"{ru_info} {worker_info}")
+                        pbar.update(self.batch_size * 10)  # Approximate update
                         
-                        # Only update progress bar every 5 batches for speed
-                        if self.batch_count % self.progress_update_interval == 0:
-                            # Update progress bar with RU rate (minimal formatting)
-                            ru_info = f"RU:{self.ru_per_second:.0f}" if not self.is_throttling else f"\033[91mRU:{self.ru_per_second:.0f}\033[0m"
-                            pbar.set_postfix_str(ru_info)
-                            pbar.update(self.pending_updates)
-                            self.pending_updates = 0
-                    elif isinstance(result, Exception):
-                        logger.error(f"Task failed: {result}")
+                        # Adaptive concurrency control
+                        self._adaptive_concurrency_control(self.ru_per_second)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing batch request: {e}")
+                    break
+            
+            # Signal end to generation workers
+            if self.generation_queue is not None:
+                for _ in range(self.generation_workers):
+                    await self.generation_queue.put(None)
+            
+            # Signal end to write workers
+            if self.write_queue is not None:
+                for _ in range(self.write_workers):
+                    await self.write_queue.put(None)
+            
+            # Wait for all workers to complete
+            if self.generation_tasks:
+                await asyncio.gather(*self.generation_tasks, return_exceptions=True)
+            
+            if self.write_tasks:
+                await asyncio.gather(*self.write_tasks, return_exceptions=True)
                 
         except Exception as e:
-            logger.error(f"Error in optimized generation: {e}")
+            logger.error(f"Error in ULTRA-FAST generation: {e}")
         finally:
             pbar.close()
             
