@@ -23,31 +23,31 @@ class Environment(Enum):
 
 @dataclass
 class DatabaseSettings:
-    """Database configuration settings"""
+    """Database configuration settings - ULTRA-FAST optimized"""
     connection_string: str
     database_name: str
     collection_name: str
-    batch_size: int = 1000
-    max_pool_size: int = 100
-    min_pool_size: int = 10
+    batch_size: int = 10000  # Increased from 1000 to 10000
+    max_pool_size: int = 200  # Increased from 100 to 200
+    min_pool_size: int = 20   # Increased from 10 to 20
     max_idle_time_ms: int = 300000
     socket_timeout_ms: int = 30000
     connect_timeout_ms: int = 20000
-    warmup_connections: int = 10
+    warmup_connections: int = 50  # Increased from 10 to 50
 
 @dataclass
 class WorkerSettings:
-    """Worker configuration settings"""
-    max_workers: int = 10
-    min_workers: int = 2
-    write_workers: int = 5
-    generation_workers: int = 3
-    queue_multiplier: int = 5
-    write_queue_multiplier: int = 5
+    """Worker configuration settings - ULTRA-FAST optimized"""
+    max_workers: int = 30
+    min_workers: int = 4
+    write_workers: int = 20  # Increased from 5 to 20
+    generation_workers: int = 8
+    queue_multiplier: int = 10
+    write_queue_multiplier: int = 10
 
 @dataclass
 class PerformanceSettings:
-    """Performance optimization settings"""
+    """Performance optimization settings - ULTRA-FAST optimized"""
     batch_aggregation_size: int = 5
     batch_aggregation_timeout_ms: int = 200
     progress_update_interval: int = 10
@@ -55,6 +55,9 @@ class PerformanceSettings:
     progress_miniters: int = 1000
     max_retries: int = 3
     backoff_base_seconds: float = 0.1
+    read_ahead_batches: int = 10000  # ULTRA-FAST: Increased from 100
+    read_ahead_workers: int = 4  # ULTRA-FAST: Multiple parallel cursors
+    max_concurrent_batches: int = 50  # ULTRA-FAST: Increased from 20
 
 @dataclass
 class MonitoringSettings:
@@ -234,9 +237,9 @@ class ConfigManager:
         
         # Workers
         config["workers"] = {
-            "max_workers": int(os.getenv(f"{self.config_prefix}_MAX_WORKERS", "10")),
+            "max_workers": int(os.getenv(f"{self.config_prefix}_MAX_WORKERS", "30")),
             "min_workers": int(os.getenv(f"{self.config_prefix}_MIN_WORKERS", "2")),
-            "write_workers": int(os.getenv(f"{self.config_prefix}_WRITE_WORKERS", "5")),
+            "write_workers": int(os.getenv(f"{self.config_prefix}_WRITE_WORKERS", "20")),
             "generation_workers": int(os.getenv(f"{self.config_prefix}_GENERATION_WORKERS", "3")),
             "queue_multiplier": int(os.getenv(f"{self.config_prefix}_QUEUE_MULTIPLIER", "5")),
             "write_queue_multiplier": int(os.getenv(f"{self.config_prefix}_WRITE_QUEUE_MULTIPLIER", "5"))

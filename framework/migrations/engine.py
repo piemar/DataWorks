@@ -11,53 +11,16 @@ from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 from collections import deque
+from datetime import datetime
 
 from tqdm import tqdm
+from pymongo.errors import InvalidOperation
 
 from ..core.database import BaseDatabaseClient, DatabaseConfig, DatabaseType, create_database_client
 from ..config.manager import FrameworkConfig, MigrationConfig
 from ..monitoring.metrics import MetricsCollector, OperationType
 
 logger = logging.getLogger(__name__)
-
-class ProgressBarLogHandler(logging.Handler):
-    """Custom logging handler that displays logs below progress bar"""
-    
-    def __init__(self, pbar, max_messages=5):
-        super().__init__()
-        self.pbar = pbar
-        self.max_messages = max_messages
-        self.message_buffer = deque(maxlen=max_messages)
-        self.original_stream = None
-        
-    def emit(self, record):
-        """Emit a log record"""
-        try:
-            # Format the log message
-            msg = self.format(record)
-            
-            # Add to buffer
-            self.message_buffer.append(msg)
-            
-            # Update progress bar postfix with latest messages
-            if self.message_buffer:
-                # Join last few messages with newlines
-                latest_messages = '\n'.join(list(self.message_buffer)[-3:])  # Show last 3 messages
-                self.pbar.set_postfix_str(f"\n{latest_messages}")
-                
-        except Exception:
-            pass  # Ignore logging errors to avoid performance impact
-    
-    def flush(self):
-        """Flush the handler"""
-        pass
-
-class MigrationStrategy(Enum):
-    """Migration strategies"""
-    FULL_MIGRATION = "full_migration"
-    INCREMENTAL = "incremental"
-    STREAMING = "streaming"
-    BATCH = "batch"
 
 @dataclass
 class MigrationBatch:
@@ -141,7 +104,11 @@ class MigrationEngine:
         self.is_running = False
         self.write_queue = None
         self.write_tasks = []
-        self.checkpoint_file = "migration_checkpoint.json"
+        
+        # Performance tracking
+        self.last_update_time = 0
+        self.last_docs_count = 0
+        self.instant_rate = 0
     
     async def initialize(self) -> bool:
         """Initialize the migration engine"""
@@ -206,7 +173,8 @@ class MigrationEngine:
     
     async def migrate(self, 
                      progress_callback: Optional[Callable] = None,
-                     checkpoint_callback: Optional[Callable] = None) -> Dict[str, Any]:
+                     checkpoint_callback: Optional[Callable] = None,
+                     force_from_start: bool = False) -> Dict[str, Any]:
         """Execute migration using the configured strategy"""
         
         if not self.migration_strategy:
@@ -214,10 +182,17 @@ class MigrationEngine:
         
         logger.info("Starting migration...")
         
-        # Get resume point
-        resume_from = await self.migration_strategy.get_resume_point()
-        if resume_from:
-            logger.info(f"Resuming migration from: {resume_from}")
+        # Detect and recover from corrupted checkpoints
+        await self._detect_and_recover_corrupted_checkpoint()
+        
+        # Get resume point (skip if force_from_start)
+        resume_from = None
+        if not force_from_start:
+            resume_from = await self.migration_strategy.get_resume_point(force_from_start=force_from_start)
+            if resume_from:
+                logger.info(f"Resuming migration from: {resume_from}")
+        else:
+            logger.info("🚀 Force from start enabled - starting migration from beginning")
         
         # Start timing
         self.migration_strategy.start_time = time.time()
@@ -230,20 +205,29 @@ class MigrationEngine:
         total_docs = await self.source_client.get_estimated_count()
         
         # Seed progress with already migrated docs in target (estimated)
-        try:
-            migrated_so_far = await self.target_client.get_estimated_count()
-        except Exception:
+        # Skip seeding if force_from_start is True
+        if force_from_start:
             migrated_so_far = 0
+            logger.info("🚀 Force from start: Progress bar starting from 0")
+        else:
+            try:
+                migrated_so_far = await self.target_client.get_estimated_count()
+                logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents")
+            except Exception:
+                migrated_so_far = 0
+                logger.info("📊 Progress bar starting from 0 (could not get target count)")
+        
         self.migration_strategy.documents_migrated = migrated_so_far
         
         # Create progress bar with custom rate formatting
+        progress_desc = "🚀 Migrating data (from start)" if force_from_start else "🚀 Migrating data"
         pbar = tqdm(
             total=total_docs,
-            desc="🚀 Migrating data",
+            desc=progress_desc,
             unit="docs",
             unit_scale=True,
             ncols=120,
-            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, Rate: {rate_fmt}] {postfix}',
+            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, Rate: {rate_fmt}]',
             colour='blue',
             smoothing=self.config.performance.progress_smoothing,
             miniters=self.config.performance.progress_miniters,
@@ -254,81 +238,205 @@ class MigrationEngine:
             file=sys.stdout
         )
         
-        # Set up custom logging handler to show logs below progress bar
-        log_handler = ProgressBarLogHandler(pbar, max_messages=5)
-        log_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        log_handler.setFormatter(formatter)
-        
-        # Add handler to root logger to catch all migration-related logs
-        root_logger = logging.getLogger()
-        root_logger.addHandler(log_handler)
-        
         try:
-            # Migration loop
-            batch_number = 0
+            # Start write workers
+            await self._start_write_workers()
             
-            while self.is_running:
-                # Read batch
-                batch = await self.migration_strategy.read_batch(
-                    self.config.source_database.batch_size,
-                    resume_from
-                )
-                
-                if not batch.documents:
-                    break  # No more documents
-                
-                batch_number += 1
-                
-                # Queue for writing
-                await self.write_queue.put((batch, pbar))
-                
-                # Update resume point
-                resume_from = batch.source_cursor_position
-                
-                # Update progress periodically
-                if batch_number % self.config.performance.progress_update_interval == 0:
-                    stats = self.migration_strategy.get_migration_stats()
-                    pbar.set_postfix_str(f"Rate: {stats['migration_rate']:.0f} docs/s")
-                    pbar.refresh()
-                    
-                    # Call progress callback if provided
-                    if progress_callback:
-                        await progress_callback(stats)
-                    
-                    # Save checkpoint
-                    if checkpoint_callback:
-                        checkpoint = self._create_checkpoint()
-                        await checkpoint_callback(checkpoint)
+            # ULTRA-FAST: Start aggressive read-ahead worker (like original migrate_to_atlas.py)
+            await self._start_aggressive_read_worker(resume_from, pbar)
             
-            # Signal end to write workers
-            for _ in range(self.config.workers.write_workers):
-                await self.write_queue.put(None)
-            
-            # Wait for write workers to complete
-            await asyncio.gather(*self.write_tasks, return_exceptions=True)
+            # Wait for all workers to complete
+            await asyncio.gather(*self.read_tasks, *self.write_tasks, return_exceptions=True)
             
         except Exception as e:
             logger.error(f"Error during migration: {e}")
             raise
         finally:
-            # Clean up logging handler
-            root_logger = logging.getLogger()
-            root_logger.removeHandler(log_handler)
-            
             pbar.close()
             self.is_running = False
+        
+        # Save migration metadata for reliable resume points
+        await self._save_migration_metadata()
         
         # Return final statistics
         return self._get_final_stats()
     
+    async def _save_migration_metadata(self):
+        """Save migration metadata for reliable resume points"""
+        try:
+            metadata_collection = self.target_client.database["migration_metadata"]
+            
+            # Get the last document ID from the migration
+            last_document_id = None
+            if hasattr(self.migration_strategy, 'last_document_id') and self.migration_strategy.last_document_id:
+                last_document_id = self.migration_strategy.last_document_id
+            
+            # Create migration metadata document
+            metadata_doc = {
+                "collection": self.target_client.collection.name,
+                "source_database": self.source_client.config.database_name,
+                "target_database": self.target_client.config.database_name,
+                "last_document_id": last_document_id,
+                "documents_migrated": self.migration_strategy.documents_migrated,
+                "documents_skipped": self.migration_strategy.documents_skipped,
+                "errors": self.migration_strategy.errors,
+                "started_at": getattr(self, '_migration_start_time', None),
+                "completed_at": datetime.utcnow(),
+                "migration_strategy": self.migration_strategy.__class__.__name__,
+                "batch_size": self.config.source_database.batch_size,
+                "workers": self.config.workers.write_workers,
+                "status": "completed"
+            }
+            
+            # Insert or update migration metadata
+            await metadata_collection.replace_one(
+                {
+                    "collection": self.target_client.collection.name,
+                    "completed_at": {"$exists": False}  # Find incomplete migrations
+                },
+                metadata_doc,
+                upsert=True
+            )
+            
+            logger.info(f"✅ Migration metadata saved: {last_document_id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to save migration metadata: {e}")
+    
+    async def _start_read_workers(self, resume_from: Optional[str] = None):
+        """Start parallel read-ahead workers"""
+        self.read_tasks = []
+        self.read_queue = asyncio.Queue(maxsize=self.config.performance.read_ahead_batches)
+        
+        for i in range(self.config.performance.read_ahead_workers):
+            task = asyncio.create_task(self._read_ahead_worker(i, resume_from))
+            self.read_tasks.append(task)
+    
     async def _start_write_workers(self):
         """Start parallel write workers"""
         self.write_tasks = []
+        self.write_queue = asyncio.Queue(maxsize=self.config.performance.max_concurrent_batches)
+        
         for i in range(self.config.workers.write_workers):
             task = asyncio.create_task(self._write_worker(i))
             self.write_tasks.append(task)
     
+    async def _start_aggressive_read_worker(self, resume_from: Optional[str], pbar):
+        """ULTRA-FAST aggressive read-ahead worker (like original migrate_to_atlas.py)"""
+        try:
+            # Build query for resuming
+            query = {}
+            if resume_from:
+                try:
+                    import bson
+                    if bson.ObjectId.is_valid(resume_from):
+                        query["_id"] = {"$gte": bson.ObjectId(resume_from)}  # Use $gte instead of $gt
+                except Exception as e:
+                    logger.warning(f"Invalid resume point {resume_from}: {e}")
+            
+            # Create cursor with ULTRA-FAST optimizations
+            cursor = (
+                self.source_client.collection
+                .find(query)
+                .sort('_id', 1)
+                .batch_size(self.config.source_database.batch_size)
+                .hint([("_id", 1)])
+            )
+            
+            logger.info(f"🚀 Starting aggressive read worker with query: {query}")
+            logger.info(f"🚀 Resume from: {resume_from}")
+            
+            # Start aggressive read-ahead worker
+            read_task = asyncio.create_task(self._aggressive_read_worker(cursor, query, 0, pbar, resume_from))
+            self.read_tasks = [read_task]
+            
+        except Exception as e:
+            logger.error(f"Error starting aggressive read worker: {e}")
+            raise
+    
+    async def _aggressive_read_worker(self, cursor, query, worker_id: int, pbar, resume_from: Optional[str] = None):
+        """ULTRA-FAST aggressive read-ahead worker with 100ms flush intervals"""
+        try:
+            batch = []
+            batch_count = 0
+            last_flush_time = time.time()
+            flush_interval = 0.1  # ULTRA-FAST: 100ms timeout (like original)
+            min_batch_size = 1000  # Minimum batch size for immediate processing
+            skip_first = resume_from is not None  # Skip resume document if resuming
+            
+            documents_found = 0
+            async for document in cursor:
+                if not self.is_running or self.write_queue is None:
+                    break
+                
+                documents_found += 1
+                
+                if skip_first:
+                    # Skip the resume document itself
+                    skip_first = False
+                    logger.info(f"🚀 Skipped resume document: {document['_id']}")
+                    continue
+                
+                batch.append(document)
+                batch_count += 1
+                
+                # Update last_document_id in migration strategy for checkpoint saving
+                if hasattr(self.migration_strategy, 'last_document_id'):
+                    self.migration_strategy.last_document_id = str(document['_id'])
+                    logger.debug(f"🔄 Updated last_document_id: {self.migration_strategy.last_document_id}")
+                
+                # Log first few documents for debugging
+                if batch_count <= 3:
+                    logger.debug(f"🚀 Processing document {batch_count}: {document['_id']}")
+                
+                current_time = time.time()
+                should_flush_full = batch_count >= self.config.source_database.batch_size
+                should_flush_min = batch_count >= min_batch_size
+                should_flush_timeout = (batch_count > 0) and (current_time - last_flush_time >= flush_interval)
+                
+                # AGGRESSIVE: Flush on any condition to keep writers busy
+                if should_flush_full or should_flush_min or should_flush_timeout:
+                    # Create MigrationBatch for framework compatibility
+                    migration_batch = MigrationBatch(
+                        documents=batch,
+                        batch_number=getattr(self, '_batch_number', 0) + 1,
+                        source_cursor_position=str(batch[-1]['_id']) if batch else None,
+                        metadata={
+                            "worker_id": worker_id,
+                            "batch_size": len(batch),
+                            "read_at": time.time(),
+                            "aggressive_flush": True
+                        }
+                    )
+                    await self.write_queue.put((migration_batch, pbar))
+                    batch = []
+                    batch_count = 0
+                    last_flush_time = current_time
+            
+            # Put remaining documents in final batch
+            if batch and self.is_running and self.write_queue is not None:
+                migration_batch = MigrationBatch(
+                    documents=batch,
+                    batch_number=getattr(self, '_batch_number', 0) + 1,
+                    source_cursor_position=str(batch[-1]['_id']) if batch else None,
+                    metadata={
+                        "worker_id": worker_id,
+                        "batch_size": len(batch),
+                        "read_at": time.time(),
+                        "final_batch": True
+                    }
+                )
+                await self.write_queue.put((migration_batch, pbar))
+                
+        except Exception as e:
+            logger.error(f"Error in aggressive read worker {worker_id}: {e}")
+        finally:
+            logger.info(f"🚀 Aggressive read worker {worker_id} completed. Documents found: {documents_found}, Documents processed: {batch_count}")
+            # Signal end to write workers
+            if self.write_queue is not None:
+                for _ in range(self.config.workers.write_workers):
+                    await self.write_queue.put(None)
+
     async def _write_worker(self, worker_id: int):
         """Parallel write worker with batch aggregation"""
         try:
@@ -376,47 +484,293 @@ class MigrationEngine:
             logger.error(f"Write worker {worker_id} failed: {e}")
     
     async def _write_batch_aggregated(self, batches: List[MigrationBatch], worker_id: int, pbar=None):
-        """Write aggregated batches to target database"""
-        if not batches:
-            return
+        """ULTRA-FAST aggregated batch migration with direct bulk operations (like original migrate_to_atlas.py)"""
+        batch_start_time = time.time()
+        stats = {'migrated': 0, 'skipped': 0, 'errors': 0}
         
         try:
-            # Flatten all batches
+            if not batches:
+                return stats
+            
+            # Flatten all batches into one massive batch (like original)
             all_docs = []
             for batch in batches:
                 all_docs.extend(batch.documents)
             
             if not all_docs:
-                return
+                return stats
             
-            # Track metrics
+            logger.debug(f"Worker {worker_id}: Processing ULTRA-FAST aggregated batch of {len(all_docs)} documents")
+            
+            # Track metrics (keeping enterprise monitoring)
             operation = self.metrics_collector.start_operation(
                 f"write_worker_{worker_id}",
                 OperationType.WRITE,
                 len(all_docs)
             )
             
-            # Write to target database
-            inserted_count = await self.target_client.bulk_insert(all_docs, ordered=False)
+            # ULTRA-FAST bulk write with maximum parallelization (like original)
+            async def _bulk_write_aggregated():
+                try:
+                    from pymongo import InsertOne
+                    
+                    # Convert all documents to bulk operations
+                    bulk_operations = [InsertOne(doc) for doc in all_docs]
+                    
+                    # ULTRA-FAST: Use full batch size for maximum efficiency (like original)
+                    chunk_size = len(all_docs)  # Single massive operation
+                    chunks = [bulk_operations[i:i + chunk_size] 
+                            for i in range(0, len(bulk_operations), chunk_size)]
+                    
+                    # Create parallel bulk write tasks
+                    bulk_tasks = []
+                    for chunk in chunks:
+                        task = self.target_client.collection.bulk_write(
+                            chunk,
+                            ordered=False  # Continue on errors for speed
+                        )
+                        bulk_tasks.append(task)
+                    
+                    # Execute all chunks in parallel
+                    results = await asyncio.gather(*bulk_tasks, return_exceptions=True)
+                    
+                    # Aggregate results
+                    total_inserted = 0
+                    total_skipped = 0
+                    for result in results:
+                        if isinstance(result, Exception):
+                            error_str = str(result).lower()
+                            if "duplicate key" in error_str or "e11000" in error_str:
+                                # Count duplicates as skipped
+                                total_skipped += len(chunk) if 'chunk' in locals() else 0
+                                logger.debug(f"Worker {worker_id}: Skipped {len(chunk) if 'chunk' in locals() else 0} duplicate documents")
+                                continue  # Skip duplicates silently
+                            else:
+                                logger.error(f"Worker {worker_id}: Bulk write error: {result}")
+                                raise result
+                        else:
+                            try:
+                                total_inserted += result.inserted_count
+                                # Count duplicates from bulk write result
+                                if hasattr(result, 'upserted_count'):
+                                    total_skipped += result.upserted_count
+                            except (AttributeError, InvalidOperation):
+                                # With unacknowledged writes, assume all documents were inserted
+                                total_inserted += len(chunk) if 'chunk' in locals() else 0
+                    
+                    stats['migrated'] = total_inserted
+                    stats['skipped'] = total_skipped
+                    return results[0] if results else None
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if "duplicate key" in error_str or "e11000" in error_str:
+                        stats['skipped'] = len(all_docs)
+                        logger.debug(f"Worker {worker_id}: Bulk write failed with duplicates - skipped {len(all_docs)} documents")
+                        class DuplicateResult:
+                            inserted_count = 0
+                        return DuplicateResult()
+                    else:
+                        logger.error(f"Worker {worker_id}: Bulk write failed with error: {e}")
+                        raise e
+            
+            try:
+                result = await _bulk_write_aggregated()
+            except Exception as e:
+                # If bulk write fails completely, fall back to individual document insertion
+                logger.warning(f"Worker {worker_id}: Bulk write failed, falling back to individual insertion: {e}")
+                result = await self._insert_documents_individually(all_docs, worker_id, stats)
             
             # Update migration strategy stats
-            self.migration_strategy.documents_migrated += inserted_count
+            self.migration_strategy.documents_migrated += stats['migrated']
+            self.migration_strategy.documents_skipped += stats['skipped']
+            self.migration_strategy.errors += stats['errors']
             
-            # Update metrics
-            self.metrics_collector.end_operation(operation, inserted_count, True)
+            # Save checkpoint after every batch (non-blocking)
+            if stats['migrated'] > 0 or stats['skipped'] > 0:
+                asyncio.create_task(self._save_checkpoint_async())
             
-            # Update progress bar
-            if pbar:
-                pbar.update(inserted_count)
-                pbar.refresh()
+            # Update metrics (keeping enterprise monitoring)
+            self.metrics_collector.end_operation(operation, stats['migrated'], True)
             
-            logger.debug(f"Worker {worker_id}: Migrated {inserted_count} documents")
+            # Track performance for this aggregated batch
+            batch_time = time.time() - batch_start_time
+            docs_per_second = len(all_docs) / batch_time if batch_time > 0 else 0
+            
+            # ULTRA-FAST real-time progress update (immediate)
+            if pbar and stats['migrated'] > 0:
+                pbar.update(stats['migrated'])
+                self._update_realtime_rate(pbar, stats['migrated'])
+                pbar.refresh()  # Force immediate display update
+            
+            logger.debug(f"Worker {worker_id}: ULTRA-FAST aggregated batch completed - {docs_per_second:.0f} docs/s")
             
         except Exception as e:
             logger.error(f"Worker {worker_id}: Failed to migrate batch: {e}")
             self.migration_strategy.errors += 1
             if pbar:
                 pbar.update(0)  # Update progress even on failure
+    
+    async def _insert_documents_individually(self, documents: List[Dict], worker_id: int, stats: Dict):
+        """Fallback method: Insert documents individually with duplicate handling"""
+        logger.info(f"Worker {worker_id}: Inserting {len(documents)} documents individually...")
+        
+        for doc in documents:
+            try:
+                await self.target_client.collection.insert_one(doc)
+                stats['migrated'] += 1
+            except Exception as e:
+                error_str = str(e).lower()
+                if "duplicate key" in error_str or "e11000" in error_str:
+                    stats['skipped'] += 1
+                    logger.debug(f"Worker {worker_id}: Skipped duplicate document: {doc.get('_id', 'unknown')}")
+                else:
+                    stats['errors'] += 1
+                    logger.error(f"Worker {worker_id}: Failed to insert document {doc.get('_id', 'unknown')}: {e}")
+        
+        logger.info(f"Worker {worker_id}: Individual insertion completed - {stats['migrated']} migrated, {stats['skipped']} skipped, {stats['errors']} errors")
+        return None
+    
+    async def _save_checkpoint_async(self):
+        """Save checkpoint asynchronously after each batch (non-blocking)"""
+        try:
+            metadata_collection = self.target_client.database["migration_metadata"]
+            
+            # Get the last document ID from the migration strategy
+            last_document_id = None
+            if hasattr(self.migration_strategy, 'last_document_id') and self.migration_strategy.last_document_id:
+                last_document_id = self.migration_strategy.last_document_id
+                logger.debug(f"💾 Saving checkpoint with last_document_id: {last_document_id}")
+            else:
+                logger.debug("💾 Saving checkpoint with no last_document_id (strategy doesn't have it)")
+            
+            # Create checkpoint document
+            checkpoint_doc = {
+                "collection": self.target_client.collection.name,
+                "source_database": self.source_client.config.database_name,
+                "target_database": self.target_client.config.database_name,
+                "last_document_id": last_document_id,
+                "documents_migrated": self.migration_strategy.documents_migrated,
+                "documents_skipped": self.migration_strategy.documents_skipped,
+                "errors": self.migration_strategy.errors,
+                "checkpoint_at": datetime.utcnow(),
+                "migration_strategy": self.migration_strategy.__class__.__name__,
+                "batch_size": self.config.source_database.batch_size,
+                "workers": self.config.workers.write_workers,
+                "status": "in_progress"
+            }
+            
+            # Upsert checkpoint (replace if exists, insert if not)
+            await metadata_collection.replace_one(
+                {
+                    "collection": self.target_client.collection.name,
+                    "status": "in_progress"
+                },
+                checkpoint_doc,
+                upsert=True
+            )
+            
+            logger.debug(f"✅ Checkpoint saved: {self.migration_strategy.documents_migrated:,} migrated, {self.migration_strategy.documents_skipped:,} skipped")
+            
+        except Exception as e:
+            logger.warning(f"Failed to save checkpoint: {e}")
+    
+    async def _detect_and_recover_corrupted_checkpoint(self):
+        """Detect and recover from corrupted checkpoints"""
+        try:
+            metadata_collection = self.target_client.database["migration_metadata"]
+            
+            # Find all checkpoints for this collection
+            checkpoints = await metadata_collection.find(
+                {"collection": self.target_client.collection.name}
+            ).sort([("checkpoint_at", -1), ("completed_at", -1)]).to_list(10)
+            
+            if not checkpoints:
+                logger.info("No checkpoints found - starting fresh")
+                return
+            
+            # Check for corrupted checkpoints
+            corrupted_count = 0
+            for checkpoint in checkpoints:
+                if not await self._is_checkpoint_valid(checkpoint):
+                    corrupted_count += 1
+                    logger.warning(f"Found corrupted checkpoint: {checkpoint.get('_id')}")
+            
+            if corrupted_count > 0:
+                logger.warning(f"Found {corrupted_count} corrupted checkpoints - cleaning up")
+                await self._cleanup_corrupted_checkpoints(metadata_collection, checkpoints)
+            
+        except Exception as e:
+            logger.error(f"Checkpoint corruption detection failed: {e}")
+    
+    async def _is_checkpoint_valid(self, checkpoint: Dict) -> bool:
+        """Check if a checkpoint is valid"""
+        try:
+            # Basic validation
+            required_fields = ["collection", "documents_migrated", "documents_skipped", "errors"]
+            for field in required_fields:
+                if field not in checkpoint:
+                    return False
+            
+            # Check for reasonable values
+            if checkpoint["documents_migrated"] < 0 or checkpoint["documents_skipped"] < 0 or checkpoint["errors"] < 0:
+                return False
+            
+            # Check last_document_id if present
+            last_id = checkpoint.get("last_document_id")
+            if last_id:
+                import bson
+                if not bson.ObjectId.is_valid(last_id):
+                    return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    async def _cleanup_corrupted_checkpoints(self, metadata_collection, checkpoints):
+        """Clean up corrupted checkpoints"""
+        try:
+            corrupted_ids = []
+            for checkpoint in checkpoints:
+                if not await self._is_checkpoint_valid(checkpoint):
+                    corrupted_ids.append(checkpoint["_id"])
+            
+            if corrupted_ids:
+                result = await metadata_collection.delete_many({"_id": {"$in": corrupted_ids}})
+                logger.info(f"Cleaned up {result.deleted_count} corrupted checkpoints")
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup corrupted checkpoints: {e}")
+    
+    def _update_realtime_rate(self, pbar, docs_processed: int):
+        """Update real-time rate calculation for progress bar"""
+        try:
+            current_time = time.time()
+            
+            # Initialize tracking variables if needed
+            if not hasattr(self, 'last_update_time') or self.last_update_time == 0:
+                self.last_update_time = current_time
+                self.last_docs_count = 0
+                self.instant_rate = 0
+                return
+            
+            # Calculate instant rate based on incremental documents processed
+            time_diff = current_time - self.last_update_time
+            
+            if time_diff > 0:
+                # docs_processed is the incremental count from this batch
+                self.instant_rate = docs_processed / time_diff
+                
+                # Update progress bar description with instant rate
+                instant_rate_str = f"{self.instant_rate:,.0f} docs/s"
+                pbar.set_description(f"🚀 Migrating data | Instant: {instant_rate_str}")
+                
+                # Update tracking variables
+                self.last_update_time = current_time
+                
+        except Exception as e:
+            logger.debug(f"Error updating real-time rate: {e}")
     
     def _create_checkpoint(self) -> Checkpoint:
         """Create a checkpoint"""

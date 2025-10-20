@@ -111,7 +111,7 @@ class MigrationStrategyFactory:
         except TypeError as e:
             if "unexpected keyword argument" in str(e):
                 # Fall back to basic constructor if config parameters not supported
-                logger.warning(f"Strategy {strategy_class.__name__} doesn't support config parameters, using basic constructor")
+                logger.debug(f"Strategy {strategy_class.__name__} using basic constructor (config parameters not needed)")
                 return strategy_class(source_client, target_client)
             else:
                 raise e

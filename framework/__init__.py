@@ -46,7 +46,6 @@ from .generators.factory import GeneratorFactory
 from .migrations.engine import (
     MigrationEngine,
     BaseMigrationStrategy,
-    MigrationStrategy,
     MigrationBatch,
     Checkpoint,
     create_migration_engine
@@ -99,7 +98,6 @@ __all__ = [
     # Migration
     "MigrationEngine",
     "BaseMigrationStrategy",
-    "MigrationStrategy",
     "MigrationBatch",
     "Checkpoint",
     "create_migration_engine",

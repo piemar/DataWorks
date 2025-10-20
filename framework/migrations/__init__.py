@@ -4,7 +4,6 @@ Migration Framework
 from .engine import (
     MigrationEngine,
     BaseMigrationStrategy,
-    MigrationStrategy,
     MigrationBatch,
     Checkpoint,
     create_migration_engine

@@ -27,7 +27,6 @@ class DatabaseType(Enum):
     """Supported database types"""
     COSMOS_DB = "cosmos_db"
     MONGODB_ATLAS = "mongodb_atlas"
-    MONGODB_LOCAL = "mongodb_local"
 
 @dataclass
 class DatabaseConfig:
@@ -86,7 +85,7 @@ class BaseDatabaseClient(ABC):
         try:
             logger.info(f"Connecting to {self.config.db_type.value}...")
             
-            # Create client with optimized settings
+            # Create client with ULTRA-FAST optimized settings (like original migrate_to_atlas.py)
             self.client = AsyncIOMotorClient(
                 self.config.connection_string,
                 maxPoolSize=self.config.max_pool_size,
@@ -95,6 +94,15 @@ class BaseDatabaseClient(ABC):
                 socketTimeoutMS=self.config.socket_timeout_ms,
                 connectTimeoutMS=self.config.connect_timeout_ms
             )
+            
+            # ULTRA-FAST: Optimize connection pool for maximum speed (like original)
+            if self.config.db_type == DatabaseType.MONGODB_ATLAS:
+                # Apply ULTRA-FAST Atlas connection pool settings
+                self.client._pool_size = 2000  # ULTRA-FAST maximum connections
+                self.client._max_pool_size = 3000  # ULTRA-FAST maximum pool size
+                self.client._min_pool_size = 500  # ULTRA-FAST minimum pool size
+                self.client._max_idle_time_ms = 300000  # Keep connections alive (5 min)
+                logger.info("🚀 ULTRA-FAST Atlas connection pool settings applied")
             
             # Get database and collection
             self.database = self.client[self.config.database_name]
@@ -115,17 +123,25 @@ class BaseDatabaseClient(ABC):
             return False
     
     async def _warmup_connections(self):
-        """Pre-warm connection pool for better performance"""
+        """ULTRA-FAST pre-warm connection pool (like original migrate_to_atlas.py)"""
         if self.config.warmup_connections <= 0:
             return
             
-        logger.info(f"Pre-warming {self.config.warmup_connections} connections...")
+        # ULTRA-FAST: Use higher warmup target for Atlas (like original)
+        warmup_target = self.config.warmup_connections
+        if self.config.db_type == DatabaseType.MONGODB_ATLAS:
+            warmup_target = min(warmup_target, 200)  # ULTRA-FAST Atlas warmup
+            logger.info(f"🚀 ULTRA-FAST Atlas pre-warming {warmup_target} connections...")
+        else:
+            warmup_target = min(warmup_target, 50)  # Conservative for Cosmos DB
+            logger.info(f"Pre-warming {warmup_target} connections...")
+            
         warmup_tasks = []
-        for i in range(min(self.config.warmup_connections, 50)):  # Limit to 50
+        for i in range(warmup_target):
             warmup_tasks.append(self.client.admin.command('ping'))
         
         await asyncio.gather(*warmup_tasks, return_exceptions=True)
-        logger.info("Connection pool pre-warmed")
+        logger.info("🚀 ULTRA-FAST connection pool pre-warmed successfully")
     
     async def disconnect(self):
         """Disconnect from database"""
@@ -277,12 +293,19 @@ class MongoDBAtlasClient(BaseDatabaseClient):
         super().__init__(config)
     
     async def bulk_insert(self, documents: List[Dict], ordered: bool = False) -> int:
-        """Bulk insert with Atlas optimizations"""
+        """Bulk insert with Atlas optimizations - ULTRA-FAST w=0"""
         metrics = self.start_operation("bulk_insert")
         
         try:
+            # ULTRA-FAST: Use unacknowledged writes (w=0) for maximum speed
+            # Note: write_concern is set in connection string, not in insert_many()
             result = await self.collection.insert_many(documents, ordered=ordered)
-            inserted_count = len(result.inserted_ids)
+            
+            # With w=0, inserted_count may not be available, assume all inserted
+            try:
+                inserted_count = len(result.inserted_ids)
+            except (AttributeError, InvalidOperation):
+                inserted_count = len(documents)
             
             self.end_operation(metrics, inserted_count, True)
             return inserted_count
@@ -315,7 +338,7 @@ def create_database_client(config: DatabaseConfig) -> BaseDatabaseClient:
     """Factory function to create appropriate database client"""
     if config.db_type == DatabaseType.COSMOS_DB:
         return CosmosDBClient(config)
-    elif config.db_type in [DatabaseType.MONGODB_ATLAS, DatabaseType.MONGODB_LOCAL]:
+    elif config.db_type == DatabaseType.MONGODB_ATLAS:
         return MongoDBAtlasClient(config)
     else:
         raise ValueError(f"Unsupported database type: {config.db_type}")

@@ -222,6 +222,8 @@ async def main():
                        help='Create indexes from source database in target database before migration')
     parser.add_argument('--disable-indexes', action='store_true',
                        help='Explicitly disable indexes during migration (indexes are auto-disabled for optimal performance)')
+    parser.add_argument('--force-from-start', action='store_true',
+                       help='Force migration to start from the beginning, ignoring any resume points')
     
     args = parser.parse_args()
     
@@ -321,7 +323,8 @@ async def main():
         # Execute migration
         result = await engine.migrate(
             progress_callback=progress_callback,
-            checkpoint_callback=checkpoint_callback
+            checkpoint_callback=checkpoint_callback,
+            force_from_start=args.force_from_start
         )
         
         # Print final results

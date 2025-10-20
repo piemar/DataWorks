@@ -103,6 +103,11 @@ class DataGenerationEngine:
         self.write_queue = None
         self.write_tasks = []
         
+        # Performance tracking
+        self.last_update_time = 0
+        self.last_docs_count = 0
+        self.instant_rate = 0
+        
     def register_generator(self, generator: BaseDataGenerator):
         """Register a data generator"""
         self.generators[generator.generator_type] = generator
@@ -304,10 +309,11 @@ class DataGenerationEngine:
             # Update metrics
             self.metrics_collector.end_operation(operation, inserted_count, True)
             
-            # Update progress bar
-            if pbar:
+            # ULTRA-FAST: Real-time progress update with rate calculation
+            if pbar and inserted_count > 0:
                 pbar.update(inserted_count)
-                pbar.refresh()
+                self._update_realtime_rate(pbar, inserted_count)
+                pbar.refresh()  # Force immediate display update
             
             logger.debug(f"Worker {worker_id}: Wrote {inserted_count} documents")
             
@@ -315,6 +321,43 @@ class DataGenerationEngine:
             logger.error(f"Worker {worker_id}: Failed to write batch: {e}")
             if pbar:
                 pbar.update(0)  # Update progress even on failure
+    
+    def _update_realtime_rate(self, pbar, docs_processed: int):
+        """Update real-time rate calculation for progress bar"""
+        try:
+            current_time = time.time()
+            
+            # Initialize tracking variables if needed
+            if not hasattr(self, 'last_update_time') or self.last_update_time == 0:
+                self.last_update_time = current_time
+                self.last_docs_count = 0
+                self.instant_rate = 0
+                return
+            
+            # Calculate instant rate
+            time_diff = current_time - self.last_update_time
+            docs_diff = docs_processed - self.last_docs_count
+            
+            if time_diff > 0:
+                self.instant_rate = docs_diff / time_diff
+                
+                # Update progress bar description with instant rate
+                current_desc = pbar.desc or ""
+                if "Instant:" in current_desc:
+                    # Remove existing instant rate
+                    current_desc = current_desc.split("Instant:")[0].strip()
+                
+                # Add new instant rate
+                instant_rate_str = f"{self.instant_rate:,.0f} docs/s"
+                new_desc = f"{current_desc} | Instant: {instant_rate_str}"
+                pbar.set_description(new_desc)
+                
+                # Update tracking variables
+                self.last_update_time = current_time
+                self.last_docs_count = docs_processed
+                
+        except Exception as e:
+            logger.debug(f"Error updating real-time rate: {e}")
     
     def _get_final_stats(self, generator: BaseDataGenerator) -> Dict[str, Any]:
         """Get final generation statistics"""

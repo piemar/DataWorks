@@ -220,7 +220,7 @@ config = DatabaseConfig(
     max_pool_size=100,
     min_pool_size=10,
     max_idle_time_ms=300000,
-    warmup_connections=10
+    warmup_connections=50
 )
 ```
 
