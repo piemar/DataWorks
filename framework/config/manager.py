@@ -213,8 +213,8 @@ class ConfigManager:
             "max_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_POOL_SIZE", "100")),
             "min_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MIN_POOL_SIZE", "10")),
             "max_idle_time_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_IDLE_TIME_MS", "300000")),
-            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_SOCKET_TIMEOUT_MS", "30000")),
-            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_CONNECT_TIMEOUT_MS", "20000")),
+            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_SOCKET_TIMEOUT_MS") or os.getenv("GEN_SOCKET_TIMEOUT_MS", "30000")),
+            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_CONNECT_TIMEOUT_MS") or os.getenv("GEN_CONNECT_TIMEOUT_MS", "20000")),
             "warmup_connections": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_WARMUP_CONNECTIONS", "10"))
         }
         
@@ -227,8 +227,8 @@ class ConfigManager:
             "max_pool_size": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MAX_POOL_SIZE", "100")),
             "min_pool_size": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MIN_POOL_SIZE", "10")),
             "max_idle_time_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MAX_IDLE_TIME_MS", "300000")),
-            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_SOCKET_TIMEOUT_MS", "30000")),
-            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_CONNECT_TIMEOUT_MS", "20000")),
+            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_SOCKET_TIMEOUT_MS") or os.getenv("MIG_SOCKET_TIMEOUT_MS", "30000")),
+            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_CONNECT_TIMEOUT_MS") or os.getenv("MIG_CONNECT_TIMEOUT_MS", "20000")),
             "warmup_connections": int(os.getenv(f"{self.config_prefix}_TARGET_DB_WARMUP_CONNECTIONS", "10"))
         }
         
