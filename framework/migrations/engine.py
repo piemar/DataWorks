@@ -261,8 +261,33 @@ class MigrationEngine:
             # ULTRA-FAST: Start aggressive read-ahead worker (like original migrate_to_atlas.py)
             await self._start_aggressive_read_worker(resume_from, pbar)
             
-            # Wait for all workers to complete
-            await asyncio.gather(*self.read_tasks, *self.write_tasks, return_exceptions=True)
+            # Wait for read workers to complete first
+            if self.read_tasks:
+                logger.info("🔄 Waiting for read workers to complete...")
+                await asyncio.gather(*self.read_tasks, return_exceptions=True)
+                logger.info("✅ Read workers completed")
+            
+            # Give write workers time to process remaining batches
+            logger.info("🔄 Waiting for write workers to process final batches...")
+            if hasattr(self, 'progress_bar') and self.progress_bar:
+                self.progress_bar.set_description("🔄 Finalizing migration...")
+            await asyncio.sleep(2)  # Give 2 seconds for final batch processing
+            
+            # Wait for write workers to complete with timeout
+            if self.write_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*self.write_tasks, return_exceptions=True),
+                        timeout=30  # 30 second timeout for finalization
+                    )
+                    logger.info("✅ Write workers completed")
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Write workers timeout - forcing completion")
+                    # Force stop write workers
+                    self.is_running = False
+                    for task in self.write_tasks:
+                        if not task.done():
+                            task.cancel()
             
         except Exception as e:
             logger.error(f"Error during migration: {e}")
@@ -483,10 +508,12 @@ class MigrationEngine:
             logger.error(f"Error in aggressive read worker {worker_id}: {e}")
         finally:
             logger.info(f"🚀 Aggressive read worker {worker_id} completed. Documents found: {documents_found}, Documents processed: {batch_count}")
-            # Signal end to write workers
+            # Signal end to write workers with proper logging
             if self.write_queue is not None:
-                for _ in range(self.config.workers.write_workers):
+                logger.info(f"📤 Signaling {self.config.workers.write_workers} write workers to complete...")
+                for i in range(self.config.workers.write_workers):
                     await self.write_queue.put(None)
+                logger.info("✅ End signals sent to all write workers")
 
     async def _write_worker(self, worker_id: int):
         """Parallel write worker with batch aggregation"""
@@ -507,8 +534,11 @@ class MigrationEngine:
                         continue
                     
                     if batch_data is None:  # End signal
+                        logger.debug(f"📥 Write worker {worker_id} received end signal")
                         if batch_buffer:
-                            await self._write_batch_aggregated(batch_buffer, worker_id)
+                            logger.debug(f"📤 Write worker {worker_id} processing final batch of {len(batch_buffer)} batches")
+                            await self._write_batch_aggregated(batch_buffer, worker_id, pbar)
+                        logger.info(f"✅ Write worker {worker_id} completed")
                         break
                     
                     batch, pbar = batch_data
