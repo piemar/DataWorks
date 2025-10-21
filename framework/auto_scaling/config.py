@@ -156,10 +156,11 @@ class AutoScalingConfigManager:
         profile.memory_scale_up_threshold = float(os.getenv("AUTO_SCALING_MEMORY_SCALE_UP_THRESHOLD", profile.memory_scale_up_threshold))
         profile.memory_scale_down_threshold = float(os.getenv("AUTO_SCALING_MEMORY_SCALE_DOWN_THRESHOLD", profile.memory_scale_down_threshold))
         
-        profile.min_workers = int(os.getenv("AUTO_SCALING_MIN_WORKERS", profile.min_workers))
-        profile.max_workers = int(os.getenv("AUTO_SCALING_MAX_WORKERS", profile.max_workers))
-        profile.min_batch_size = int(os.getenv("AUTO_SCALING_MIN_BATCH_SIZE", profile.min_batch_size))
-        profile.max_batch_size = int(os.getenv("AUTO_SCALING_MAX_BATCH_SIZE", profile.max_batch_size))
+        # Use GEN_ prefixed environment variables for worker limits
+        profile.min_workers = int(os.getenv("GEN_MIN_WORKERS", os.getenv("AUTO_SCALING_MIN_WORKERS", profile.min_workers)))
+        profile.max_workers = int(os.getenv("GEN_MAX_WORKERS", os.getenv("AUTO_SCALING_MAX_WORKERS", profile.max_workers)))
+        profile.min_batch_size = int(os.getenv("GEN_BATCH_SIZE", os.getenv("AUTO_SCALING_MIN_BATCH_SIZE", profile.min_batch_size)))
+        profile.max_batch_size = int(os.getenv("GEN_BATCH_SIZE", os.getenv("AUTO_SCALING_MAX_BATCH_SIZE", profile.max_batch_size))) * 2  # Allow up to 2x batch size
         
         profile.scaling_check_interval = float(os.getenv("AUTO_SCALING_CHECK_INTERVAL", profile.scaling_check_interval))
         profile.scaling_cooldown = float(os.getenv("AUTO_SCALING_COOLDOWN", profile.scaling_cooldown))

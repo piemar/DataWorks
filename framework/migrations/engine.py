@@ -184,7 +184,7 @@ class MigrationEngine:
             config_manager = AutoScalingConfigManager()
             profile = config_manager.load_from_environment()
             
-            # Create auto-scaling config
+            # Create auto-scaling config using environment values
             auto_scaling_config = AutoScalingConfig(
                 target_docs_per_second=profile.target_docs_per_second,
                 target_cpu_usage=profile.target_cpu_usage,
@@ -194,10 +194,10 @@ class MigrationEngine:
                 cpu_scale_down_threshold=profile.cpu_scale_down_threshold,
                 memory_scale_up_threshold=profile.memory_scale_up_threshold,
                 memory_scale_down_threshold=profile.memory_scale_down_threshold,
-                min_workers=profile.min_workers,
-                max_workers=profile.max_workers,
-                min_batch_size=profile.min_batch_size,
-                max_batch_size=profile.max_batch_size,
+                min_workers=profile.min_workers,  # Now uses GEN_MIN_WORKERS from .env_local
+                max_workers=profile.max_workers,  # Now uses GEN_MAX_WORKERS from .env_local
+                min_batch_size=profile.min_batch_size,  # Now uses GEN_BATCH_SIZE from .env_local
+                max_batch_size=profile.max_batch_size,  # Now uses GEN_BATCH_SIZE * 2 from .env_local
                 scaling_check_interval=profile.scaling_check_interval,
                 scaling_cooldown=profile.scaling_cooldown,
                 performance_window_size=profile.performance_window_size,
