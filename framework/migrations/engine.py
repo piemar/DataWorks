@@ -221,7 +221,7 @@ class MigrationEngine:
                     # Count documents that have already been migrated (documents with _id <= resume_from)
                     # The resume_from is the last document that was successfully migrated
                     count_query = {"_id": {"$lte": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
-                    migrated_so_far = await self.source_client.collection.estimated_document_count(count_query)
+                    migrated_so_far = await self.source_client.collection.count_documents(count_query)
                     logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (based on resume point)")
                     logger.info(f"📊 Resume point: {resume_from}")
                     logger.info(f"📊 Count query: {count_query}")
