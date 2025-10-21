@@ -20,10 +20,10 @@ DataWorks is a professional-grade framework designed for large-scale NoSQL datab
 
 | Tool | Large Datasets | Resumable | Real-time Progress | Custom Logic | CosmosDB RU v3.6 |
 |------|----------------|-----------|-------------------|--------------|------------------|
-| **Compass** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **MongoDB Compass** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **mongorestore** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **mongodump** | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **mongoexport/import** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **mongoexport/mongoimport** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **MongoMirror** | ❌ | ✅ | ✅ | ❌ | ❌ |
 | **🚀 DataWorks** | ✅ 100GB+ | ✅ | ✅ | ✅ | ✅ |
 
