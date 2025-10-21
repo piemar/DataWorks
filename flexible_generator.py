@@ -22,7 +22,7 @@ from framework import (
 
 # Configure logging
 logging.basicConfig(
-    level=logging.WARNING,  # Reduced from INFO to WARNING to prevent interference with progress bar
+    level=logging.INFO,  # Changed to INFO to see auto-scaling logs
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
