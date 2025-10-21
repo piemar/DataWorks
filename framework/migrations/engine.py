@@ -213,12 +213,20 @@ class MigrationEngine:
             try:
                 # Use resume point to calculate starting position more accurately
                 if resume_from:
-                    # Count documents before resume point in source
-                    count_query = {"_id": {"$lt": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
+                    # Count documents that have already been migrated (documents with _id <= resume_from)
+                    # The resume_from is the last document that was successfully migrated
+                    count_query = {"_id": {"$lte": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
                     migrated_so_far = await self.source_client.collection.count_documents(count_query)
                     logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (based on resume point)")
                     logger.info(f"📊 Resume point: {resume_from}")
                     logger.info(f"📊 Count query: {count_query}")
+                    
+                    # Verify this makes sense - migrated_so_far should be > 0 when resuming
+                    if migrated_so_far == 0:
+                        logger.warning("⚠️ Resume point found but count is 0 - this might indicate an issue")
+                        # Fallback to target count
+                        migrated_so_far = await self.target_client.get_estimated_count()
+                        logger.info(f"📊 Fallback: Using target count {migrated_so_far:,} documents")
                 else:
                     migrated_so_far = await self.target_client.get_estimated_count()
                     logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (target count)")
