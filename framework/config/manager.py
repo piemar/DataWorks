@@ -31,6 +31,7 @@ class DatabaseSettings:
     database_name: str
     collection_name: str
     batch_size: int = 10000  # Increased from 1000 to 10000
+    generation_batch_size: int = 5000  # Smaller batches for generation to improve progress updates
     max_pool_size: int = 200  # Increased from 100 to 200
     min_pool_size: int = 20   # Increased from 10 to 20
     max_idle_time_ms: int = 300000
@@ -342,6 +343,7 @@ class ConfigManager:
             "database_name": os.getenv(f"{self.config_prefix}_SOURCE_DB_NAME") or os.getenv("GEN_DB_NAME", "volvo-service-orders"),
             "collection_name": os.getenv(f"{self.config_prefix}_SOURCE_DB_COLLECTION") or os.getenv("GEN_DB_COLLECTION", "serviceorders"),
             "batch_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_BATCH_SIZE") or os.getenv("GEN_CURSOR_BATCH_SIZE", "1000")),
+            "generation_batch_size": int(os.getenv(f"{self.config_prefix}_GENERATION_BATCH_SIZE") or os.getenv("GEN_GENERATION_BATCH_SIZE", "5000")),
             "max_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_POOL_SIZE") or os.getenv("GEN_MAX_POOL_SIZE", "100")),
             "min_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MIN_POOL_SIZE") or os.getenv("GEN_MIN_POOL_SIZE", "10")),
             "max_idle_time_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_IDLE_TIME_MS") or os.getenv("GEN_MAX_IDLE_TIME_MS", "300000")),

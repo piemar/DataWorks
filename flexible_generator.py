@@ -48,6 +48,10 @@ async def main():
                        help='List available generators and exit')
     parser.add_argument('--list-templates', action='store_true',
                        help='List available JSON templates and exit')
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume generation from last checkpoint')
+    parser.add_argument('--force-from-start', action='store_true',
+                       help='Force start from beginning, ignoring any checkpoint')
     
     args = parser.parse_args()
     
