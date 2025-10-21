@@ -111,6 +111,11 @@ class DataGenerationEngine:
         # Performance tracking
         self.total_documents_written = 0
         
+        # Instant rate tracking
+        self.last_update_time = 0
+        self.last_docs_count = 0
+        self.instant_rate = 0
+        
         # Checkpoint system
         self.checkpoint_file = "generation_checkpoint.json"
         self.checkpoint_interval = 10000  # Save checkpoint every 10k documents
@@ -441,6 +446,10 @@ class DataGenerationEngine:
                 if pbar and self.progress_bar:
                     self.progress_bar.update(inserted_count)
                     self.progress_bar.refresh()  # Force immediate display update
+                    
+                # Update instant rate calculation
+                if inserted_count > 0:  # Only update rate when documents are actually processed
+                    self._update_realtime_rate(self.progress_bar, inserted_count)
                 
                 # Save checkpoint periodically (silent)
                 if self.total_documents_written % self.checkpoint_interval == 0:
@@ -588,6 +597,42 @@ class DataGenerationEngine:
         except Exception as e:
             logger.error(f"Error collecting generation metrics: {e}")
             return {}
+    
+    def _update_realtime_rate(self, pbar, docs_processed: int):
+        """Update real-time rate calculation and progress bar description"""
+        try:
+            current_time = time.time()
+            
+            # Initialize tracking variables if needed
+            if not hasattr(self, 'last_update_time') or self.last_update_time == 0:
+                self.last_update_time = current_time
+                self.last_docs_count = 0
+                self.instant_rate = 0
+                return
+            
+            # Calculate instant rate based on incremental documents processed
+            time_diff = current_time - self.last_update_time
+            
+            if time_diff > 0:
+                # docs_processed is the incremental count from this batch
+                instant_rate = docs_processed / time_diff
+                
+                # Smooth out extreme spikes (cap at reasonable maximum)
+                if instant_rate > 100000:  # Cap at 100k docs/s to avoid display issues
+                    instant_rate = 100000
+                
+                self.instant_rate = instant_rate
+                
+                # Update progress bar description with instant rate
+                instant_rate_str = f"{self.instant_rate:,.0f} docs/s"
+                pbar.set_description(f"🚀 Generating custom data | Instant: {instant_rate_str}")
+            
+            # Update tracking variables
+            self.last_update_time = current_time
+            self.last_docs_count += docs_processed
+            
+        except Exception as e:
+            logger.error(f"Error updating real-time rate: {e}")
 
 # Factory function for creating generation engines
 def create_generation_engine(config: FrameworkConfig) -> DataGenerationEngine:
