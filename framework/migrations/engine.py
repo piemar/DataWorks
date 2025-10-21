@@ -219,6 +219,10 @@ class MigrationEngine:
             self.auto_scaling_enabled = True
             logger.info(f"🚀 Auto-scaling initialized with profile: {profile.name}")
             
+            # Start auto-scaling monitoring
+            await self.auto_scaler.start_monitoring(self.auto_scaling_metrics_collector.collect_metrics)
+            logger.info("📊 Auto-scaling monitoring started")
+            
         except Exception as e:
             logger.error(f"Failed to initialize auto-scaling: {e}")
             self.auto_scaling_enabled = False
@@ -961,6 +965,11 @@ class MigrationEngine:
         
         if self.target_client:
             await self.target_client.disconnect()
+        
+        # Stop auto-scaling monitoring
+        if self.auto_scaling_enabled and self.auto_scaler:
+            await self.auto_scaler.stop_monitoring()
+            logger.info("📊 Auto-scaling monitoring stopped")
         
         logger.info("Migration engine cleaned up")
     
