@@ -1,6 +1,6 @@
 """
 Configuration Management Framework
-Enterprise-ready configuration system with validation, environment variable support, and type safety
+Enterprise-ready configuration system with validation, environment variable support, type safety, and profile-based configuration
 """
 import os
 import logging
@@ -11,6 +11,9 @@ from pathlib import Path
 import json
 import yaml
 from dotenv import load_dotenv
+
+# Import profile system
+from .profiles import PROFILES, get_profile, merge_profile_settings, validate_profile_settings, list_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +129,7 @@ class ConfigManager:
     Enterprise configuration manager with support for:
     - Environment variables
     - Configuration files (JSON/YAML)
+    - Profile-based configuration
     - Validation
     - Type safety
     - Environment-specific overrides
@@ -134,6 +138,7 @@ class ConfigManager:
     def __init__(self, config_prefix: str = "FRAMEWORK"):
         self.config_prefix = config_prefix
         self.config: Optional[FrameworkConfig] = None
+        self.current_profile: Optional[str] = None
         self._load_environment_variables()
     
     def _load_environment_variables(self):
@@ -253,14 +258,28 @@ class ConfigManager:
             "progress_smoothing": float(os.getenv(f"{self.config_prefix}_PROGRESS_SMOOTHING", "0.1")),
             "progress_miniters": int(os.getenv(f"{self.config_prefix}_PROGRESS_MINITERS", "1000")),
             "max_retries": int(os.getenv(f"{self.config_prefix}_MAX_RETRIES", "3")),
-            "backoff_base_seconds": float(os.getenv(f"{self.config_prefix}_BACKOFF_BASE_SECONDS", "0.1"))
+            "backoff_base_seconds": float(os.getenv(f"{self.config_prefix}_BACKOFF_BASE_SECONDS", "0.1")),
+            "read_ahead_batches": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_BATCHES", "10000")),
+            "read_ahead_workers": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_WORKERS", "4")),
+            "max_concurrent_batches": int(os.getenv(f"{self.config_prefix}_MAX_CONCURRENT_BATCHES", "50"))
         }
         
-        # Data generation
+        # Monitoring
+        config["monitoring"] = {
+            "enable_metrics": os.getenv(f"{self.config_prefix}_ENABLE_METRICS", "true").lower() == "true",
+            "metrics_interval_seconds": int(os.getenv(f"{self.config_prefix}_METRICS_INTERVAL_SECONDS", "10")),
+            "performance_window_size": int(os.getenv(f"{self.config_prefix}_PERFORMANCE_WINDOW_SIZE", "20")),
+            "performance_check_interval_seconds": int(os.getenv(f"{self.config_prefix}_PERFORMANCE_CHECK_INTERVAL_SECONDS", "30")),
+            "throttling_threshold_percentage": float(os.getenv(f"{self.config_prefix}_THROTTLING_THRESHOLD_PERCENTAGE", "10.0")),
+            "scaling_cooldown_seconds": int(os.getenv(f"{self.config_prefix}_SCALING_COOLDOWN_SECONDS", "60")),
+            "scale_up_cooldown_seconds": int(os.getenv(f"{self.config_prefix}_SCALE_UP_COOLDOWN_SECONDS", "30"))
+        }
+        
+        # Data Generation
         config["data_generation"] = {
-            "total_documents": int(os.getenv(f"{self.config_prefix}_TOTAL_DOCUMENTS", "1000000")),
-            "document_size_kb": float(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_KB", "2.5")),
-            "document_size_multiplier": int(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_MULTIPLIER", "1024")),
+            "total_documents": int(os.getenv(f"{self.config_prefix}_TOTAL_DOCUMENTS") or os.getenv("GEN_TOTAL_DOCUMENTS", "1000000")),
+            "document_size_kb": float(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_KB") or os.getenv("GEN_DOCUMENT_SIZE_KB", "2.5")),
+            "document_size_multiplier": int(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_MULTIPLIER") or os.getenv("GEN_DOCUMENT_SIZE_MULTIPLIER", "1024")),
             "ru_per_document": int(os.getenv(f"{self.config_prefix}_RU_PER_DOCUMENT", "6")),
             "ru_check_interval_seconds": int(os.getenv(f"{self.config_prefix}_RU_CHECK_INTERVAL_SECONDS", "10")),
             "monitoring_batch_interval": int(os.getenv(f"{self.config_prefix}_MONITORING_BATCH_INTERVAL", "10")),
@@ -271,13 +290,137 @@ class ConfigManager:
         
         # Migration
         config["migration"] = {
-            "resume_from_checkpoint": os.getenv(f"{self.config_prefix}_RESUME_FROM_CHECKPOINT", "true").lower() == "true",
-            "parallel_cursors": int(os.getenv(f"{self.config_prefix}_PARALLEL_CURSORS", "4")),
-            "max_insert_workers": int(os.getenv(f"{self.config_prefix}_MAX_INSERT_WORKERS", "20")),
-            "read_ahead_batches": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_BATCHES", "100")),
-            "read_ahead_workers": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_WORKERS", "1")),
-            "max_concurrent_batches": int(os.getenv(f"{self.config_prefix}_MAX_CONCURRENT_BATCHES", "20")),
-            "fast_start": os.getenv(f"{self.config_prefix}_FAST_START", "false").lower() == "true"
+            "resume_from_checkpoint": os.getenv(f"{self.config_prefix}_RESUME_FROM_CHECKPOINT") or os.getenv("MIG_RESUME_FROM_CHECKPOINT", "true").lower() == "true",
+            "parallel_cursors": int(os.getenv(f"{self.config_prefix}_PARALLEL_CURSORS") or os.getenv("MIG_PARALLEL_CURSORS", "4")),
+            "max_insert_workers": int(os.getenv(f"{self.config_prefix}_MAX_INSERT_WORKERS") or os.getenv("MIG_MAX_INSERT_WORKERS", "20")),
+            "read_ahead_batches": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_BATCHES") or os.getenv("MIG_READ_AHEAD_BATCHES", "100")),
+            "read_ahead_workers": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_WORKERS") or os.getenv("MIG_READ_AHEAD_WORKERS", "1")),
+            "max_concurrent_batches": int(os.getenv(f"{self.config_prefix}_MAX_CONCURRENT_BATCHES") or os.getenv("MIG_MAX_CONCURRENT_BATCHES", "20")),
+            "fast_start": os.getenv(f"{self.config_prefix}_FAST_START") or os.getenv("MIG_FAST_START", "false").lower() == "true"
+        }
+        
+        return config
+    
+    def _load_from_environment(self) -> Dict[str, Any]:
+        """Load configuration from environment variables with profile support"""
+        config = {}
+        
+        # Check for profile setting first
+        profile_name = os.getenv("FRAMEWORK_PROFILE")
+        if profile_name:
+            self.current_profile = profile_name
+            logger.info(f"Using profile: {profile_name}")
+            
+            # Get profile settings
+            profile_settings = get_profile(profile_name)
+            if profile_settings:
+                # Start with profile defaults
+                config.update(profile_settings["settings"])
+            else:
+                logger.warning(f"Profile '{profile_name}' not found, using environment variables only")
+        
+        # Load all environment variables (these will override profile settings)
+        env_config = self._load_all_environment_variables()
+        config.update(env_config)
+        
+        return config
+    
+    def _load_all_environment_variables(self) -> Dict[str, Any]:
+        """Load all environment variables (profile overrides)"""
+        config = {}
+        
+        # Environment
+        env = os.getenv(f"{self.config_prefix}_ENVIRONMENT", "development")
+        config["environment"] = Environment(env)
+        
+        # Log level
+        config["log_level"] = os.getenv(f"{self.config_prefix}_LOG_LEVEL", "INFO")
+        
+        # Source database
+        config["source_database"] = {
+            "connection_string": os.getenv(f"{self.config_prefix}_SOURCE_DB_CONNECTION_STRING") or os.getenv("GEN_DB_CONNECTION_STRING", ""),
+            "database_name": os.getenv(f"{self.config_prefix}_SOURCE_DB_NAME") or os.getenv("GEN_DB_NAME", "volvo-service-orders"),
+            "collection_name": os.getenv(f"{self.config_prefix}_SOURCE_DB_COLLECTION") or os.getenv("GEN_DB_COLLECTION", "serviceorders"),
+            "batch_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_BATCH_SIZE") or os.getenv("GEN_CURSOR_BATCH_SIZE", "1000")),
+            "max_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_POOL_SIZE") or os.getenv("GEN_MAX_POOL_SIZE", "100")),
+            "min_pool_size": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MIN_POOL_SIZE") or os.getenv("GEN_MIN_POOL_SIZE", "10")),
+            "max_idle_time_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_MAX_IDLE_TIME_MS") or os.getenv("GEN_MAX_IDLE_TIME_MS", "300000")),
+            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_SOCKET_TIMEOUT_MS") or os.getenv("GEN_SOCKET_TIMEOUT_MS", "30000")),
+            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_CONNECT_TIMEOUT_MS") or os.getenv("GEN_CONNECT_TIMEOUT_MS", "20000")),
+            "warmup_connections": int(os.getenv(f"{self.config_prefix}_SOURCE_DB_WARMUP_CONNECTIONS") or os.getenv("GEN_WARMUP_CONNECTIONS", "10"))
+        }
+        
+        # Target database
+        config["target_database"] = {
+            "connection_string": os.getenv(f"{self.config_prefix}_TARGET_DB_CONNECTION_STRING") or os.getenv("MIG_TARGET_DB_CONNECTION_STRING", ""),
+            "database_name": os.getenv(f"{self.config_prefix}_TARGET_DB_NAME") or os.getenv("MIG_TARGET_DB_NAME", "volvo-service-orders"),
+            "collection_name": os.getenv(f"{self.config_prefix}_TARGET_DB_COLLECTION") or os.getenv("MIG_TARGET_DB_COLLECTION", "serviceorders"),
+            "batch_size": int(os.getenv(f"{self.config_prefix}_TARGET_DB_BATCH_SIZE") or os.getenv("MIG_BATCH_SIZE", "1000")),
+            "max_pool_size": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MAX_POOL_SIZE") or os.getenv("MIG_TARGET_DB_MAX_POOL_SIZE", "100")),
+            "min_pool_size": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MIN_POOL_SIZE") or os.getenv("MIG_TARGET_DB_MIN_POOL_SIZE", "10")),
+            "max_idle_time_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_MAX_IDLE_TIME_MS") or os.getenv("MIG_TARGET_DB_MAX_IDLE_TIME_MS", "300000")),
+            "socket_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_SOCKET_TIMEOUT_MS") or os.getenv("MIG_SOCKET_TIMEOUT_MS", "30000")),
+            "connect_timeout_ms": int(os.getenv(f"{self.config_prefix}_TARGET_DB_CONNECT_TIMEOUT_MS") or os.getenv("MIG_CONNECT_TIMEOUT_MS", "20000")),
+            "warmup_connections": int(os.getenv(f"{self.config_prefix}_TARGET_DB_WARMUP_CONNECTIONS") or os.getenv("MIG_WARMUP_CONNECTIONS", "10"))
+        }
+        
+        # Workers
+        config["workers"] = {
+            "max_workers": int(os.getenv(f"{self.config_prefix}_MAX_WORKERS") or os.getenv("GEN_MAX_WORKERS", "30")),
+            "min_workers": int(os.getenv(f"{self.config_prefix}_MIN_WORKERS") or os.getenv("GEN_MIN_WORKERS", "2")),
+            "write_workers": int(os.getenv(f"{self.config_prefix}_WRITE_WORKERS") or os.getenv("GEN_WRITE_WORKERS", "20")),
+            "generation_workers": int(os.getenv(f"{self.config_prefix}_GENERATION_WORKERS") or os.getenv("GEN_WORKERS", "3")),
+            "queue_multiplier": int(os.getenv(f"{self.config_prefix}_QUEUE_MULTIPLIER", "5")),
+            "write_queue_multiplier": int(os.getenv(f"{self.config_prefix}_WRITE_QUEUE_MULTIPLIER", "5"))
+        }
+        
+        # Performance
+        config["performance"] = {
+            "batch_aggregation_size": int(os.getenv(f"{self.config_prefix}_BATCH_AGGREGATION_SIZE", "5")),
+            "batch_aggregation_timeout_ms": int(os.getenv(f"{self.config_prefix}_BATCH_AGGREGATION_TIMEOUT_MS", "200")),
+            "progress_update_interval": int(os.getenv(f"{self.config_prefix}_PROGRESS_UPDATE_INTERVAL") or os.getenv("MIG_PROGRESS_UPDATE_INTERVAL_MS", "10")),
+            "progress_smoothing": float(os.getenv(f"{self.config_prefix}_PROGRESS_SMOOTHING") or os.getenv("GEN_PROGRESS_SMOOTHING", "0.1")),
+            "progress_miniters": int(os.getenv(f"{self.config_prefix}_PROGRESS_MINITERS") or os.getenv("GEN_PROGRESS_MINITERS", "1000")),
+            "max_retries": int(os.getenv(f"{self.config_prefix}_MAX_RETRIES") or os.getenv("GEN_MAX_RETRIES", "3")),
+            "backoff_base_seconds": float(os.getenv(f"{self.config_prefix}_BACKOFF_BASE_SECONDS") or os.getenv("GEN_BACKOFF_BASE_SECONDS", "0.1")),
+            "read_ahead_batches": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_BATCHES") or os.getenv("MIG_READ_AHEAD_BATCHES", "10000")),
+            "read_ahead_workers": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_WORKERS") or os.getenv("MIG_READ_AHEAD_WORKERS", "4")),
+            "max_concurrent_batches": int(os.getenv(f"{self.config_prefix}_MAX_CONCURRENT_BATCHES") or os.getenv("MIG_MAX_CONCURRENT_BATCHES", "50"))
+        }
+        
+        # Monitoring
+        config["monitoring"] = {
+            "enable_metrics": os.getenv(f"{self.config_prefix}_ENABLE_METRICS", "true").lower() == "true",
+            "metrics_interval_seconds": int(os.getenv(f"{self.config_prefix}_METRICS_INTERVAL_SECONDS", "10")),
+            "performance_window_size": int(os.getenv(f"{self.config_prefix}_PERFORMANCE_WINDOW_SIZE") or os.getenv("GEN_PERFORMANCE_WINDOW_SIZE", "20")),
+            "performance_check_interval_seconds": int(os.getenv(f"{self.config_prefix}_PERFORMANCE_CHECK_INTERVAL_SECONDS") or os.getenv("GEN_PERFORMANCE_CHECK_INTERVAL_SECONDS", "30")),
+            "throttling_threshold_percentage": float(os.getenv(f"{self.config_prefix}_THROTTLING_THRESHOLD_PERCENTAGE") or os.getenv("GEN_THROTTLING_THRESHOLD_PERCENTAGE", "10.0")),
+            "scaling_cooldown_seconds": int(os.getenv(f"{self.config_prefix}_SCALING_COOLDOWN_SECONDS") or os.getenv("GEN_SCALING_COOLDOWN_SECONDS", "60")),
+            "scale_up_cooldown_seconds": int(os.getenv(f"{self.config_prefix}_SCALE_UP_COOLDOWN_SECONDS") or os.getenv("GEN_SCALE_UP_COOLDOWN_SECONDS", "30"))
+        }
+        
+        # Data Generation
+        config["data_generation"] = {
+            "total_documents": int(os.getenv(f"{self.config_prefix}_TOTAL_DOCUMENTS") or os.getenv("GEN_TOTAL_DOCUMENTS", "1000000")),
+            "document_size_kb": float(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_KB") or os.getenv("GEN_DOCUMENT_SIZE_KB", "2.5")),
+            "document_size_multiplier": int(os.getenv(f"{self.config_prefix}_DOCUMENT_SIZE_MULTIPLIER") or os.getenv("GEN_DOCUMENT_SIZE_MULTIPLIER", "1024")),
+            "ru_per_document": int(os.getenv(f"{self.config_prefix}_RU_PER_DOCUMENT", "6")),
+            "ru_check_interval_seconds": int(os.getenv(f"{self.config_prefix}_RU_CHECK_INTERVAL_SECONDS", "10")),
+            "monitoring_batch_interval": int(os.getenv(f"{self.config_prefix}_MONITORING_BATCH_INTERVAL", "10")),
+            "ru_throttle_threshold": int(os.getenv(f"{self.config_prefix}_RU_THROTTLE_THRESHOLD", "40000")),
+            "ru_throttle_percentage": int(os.getenv(f"{self.config_prefix}_RU_THROTTLE_PERCENTAGE", "90")),
+            "disable_throttling": os.getenv(f"{self.config_prefix}_DISABLE_THROTTLING", "true").lower() == "true"
+        }
+        
+        # Migration
+        config["migration"] = {
+            "resume_from_checkpoint": os.getenv(f"{self.config_prefix}_RESUME_FROM_CHECKPOINT") or os.getenv("MIG_RESUME_FROM_CHECKPOINT", "true").lower() == "true",
+            "parallel_cursors": int(os.getenv(f"{self.config_prefix}_PARALLEL_CURSORS") or os.getenv("MIG_PARALLEL_CURSORS", "4")),
+            "max_insert_workers": int(os.getenv(f"{self.config_prefix}_MAX_INSERT_WORKERS") or os.getenv("MIG_MAX_INSERT_WORKERS", "20")),
+            "read_ahead_batches": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_BATCHES") or os.getenv("MIG_READ_AHEAD_BATCHES", "100")),
+            "read_ahead_workers": int(os.getenv(f"{self.config_prefix}_READ_AHEAD_WORKERS") or os.getenv("MIG_READ_AHEAD_WORKERS", "1")),
+            "max_concurrent_batches": int(os.getenv(f"{self.config_prefix}_MAX_CONCURRENT_BATCHES") or os.getenv("MIG_MAX_CONCURRENT_BATCHES", "20")),
+            "fast_start": os.getenv(f"{self.config_prefix}_FAST_START") or os.getenv("MIG_FAST_START", "false").lower() == "true"
         }
         
         return config
@@ -347,6 +490,91 @@ class ConfigManager:
                 yaml.dump(config_dict, f, default_flow_style=False)
             else:
                 raise ValueError(f"Unsupported file format: {file_path_obj.suffix}")
+    
+    def get_profile(self) -> Optional[str]:
+        """Get the current active profile"""
+        return self.current_profile
+    
+    def set_profile(self, profile_name: str) -> bool:
+        """
+        Set the active profile and reload configuration.
+        
+        Args:
+            profile_name: Name of the profile to activate
+            
+        Returns:
+            True if profile was set successfully, False otherwise
+        """
+        if profile_name not in PROFILES:
+            logger.error(f"Unknown profile: {profile_name}")
+            return False
+        
+        self.current_profile = profile_name
+        logger.info(f"Activated profile: {profile_name}")
+        
+        # Reload configuration with new profile
+        self.load_config()
+        return True
+    
+    def list_available_profiles(self) -> Dict[str, str]:
+        """List all available profiles with descriptions"""
+        return list_profiles()
+    
+    def get_profile_info(self, profile_name: Optional[str] = None) -> str:
+        """
+        Get detailed information about a profile.
+        
+        Args:
+            profile_name: Profile name (uses current profile if None)
+            
+        Returns:
+            Formatted profile information
+        """
+        if profile_name is None:
+            profile_name = self.current_profile
+        
+        if not profile_name:
+            return "No profile currently active"
+        
+        from .profiles import show_profile_info
+        return show_profile_info(profile_name)
+    
+    def validate_current_config(self) -> Dict[str, Any]:
+        """
+        Validate current configuration against active profile.
+        
+        Returns:
+            Dict of validation warnings/errors
+        """
+        if not self.current_profile:
+            return {"warning": "No profile active, using default settings"}
+        
+        # Convert current config to dict for validation
+        config_dict = {}
+        if self.config:
+            # This would need to be implemented to convert config to dict
+            # For now, return empty validation
+            pass
+        
+        return validate_profile_settings(self.current_profile, config_dict)
+    
+    def load_config_with_profile(self, profile_name: str, config_file: Optional[str] = None) -> FrameworkConfig:
+        """
+        Load configuration with a specific profile.
+        
+        Args:
+            profile_name: Name of the profile to use
+            config_file: Optional configuration file
+            
+        Returns:
+            Loaded configuration
+        """
+        # Set the profile first
+        if not self.set_profile(profile_name):
+            raise ValueError(f"Invalid profile: {profile_name}")
+        
+        # Load configuration
+        return self.load_config(config_file)
 
 # Global configuration manager instance
 config_manager = ConfigManager()

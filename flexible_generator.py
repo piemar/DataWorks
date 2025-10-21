@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 async def main():
     """Main function for flexible data generation"""
     parser = argparse.ArgumentParser(description='Flexible Data Generator')
-    parser.add_argument('--source', '-s', required=True, 
+    parser.add_argument('--source', '-s', 
                        help='Source: JSON sample file, Python generator file, or builtin generator name')
     parser.add_argument('--type', '-t', default='auto', 
                        choices=['auto', 'json', 'python', 'builtin'],
-                       help='Generator type (auto-detect if not specified)')
+                       help='Generator type (default: auto-detect based on file extension)')
     parser.add_argument('--domain', '-d', 
                        help='Domain name for builtin generators')
     parser.add_argument('--total', '-n', type=int, default=1000000,
@@ -52,6 +52,10 @@ async def main():
     args = parser.parse_args()
     
     try:
+        # Validate arguments
+        if not args.list_generators and not args.list_templates and not args.source:
+            parser.error("--source is required unless using --list-generators or --list-templates")
+        
         # List generators if requested
         if args.list_generators:
             factory = GeneratorFactory()
@@ -134,9 +138,10 @@ async def main():
         async def progress_callback(stats):
             logger.info(f"Progress: {stats['documents_generated']:,} docs generated at {stats['generation_rate']:.0f} docs/s")
         
-        # Generate data
+        # Generate data using the registered generator type
+        generator_type = generator.generator_type
         result = await engine.generate_data(
-            generator_type=GeneratorType.CUSTOM,
+            generator_type=generator_type,
             total_documents=args.total,
             progress_callback=progress_callback
         )

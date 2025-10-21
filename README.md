@@ -58,59 +58,50 @@ cp .env_local.example .env_local
 nano .env_local
 ```
 
+**🎯 NEW: Profile-Based Configuration**
+
+Instead of managing 100+ configuration parameters, you now only need to:
+
+1. **Choose a profile** based on your use case:
+   - `data-ingest`: High-speed data generation (40k+ docs/s)
+   - `data-migration`: High-speed migration with stability (4k-8k docs/s)  
+   - `dev`: Development and testing (minimal resources)
+
+2. **Set your database connection strings**
+
+3. **Optionally override specific settings**
+
 **Required Configuration:**
 ```env
-# Database Configuration (GEN_ prefix for source, MIG_ prefix for target)
+# Profile Selection (choose one)
+FRAMEWORK_PROFILE=data-migration
+
+# Database Configuration (REQUIRED)
 GEN_DB_CONNECTION_STRING="mongodb://your-account:YOUR_PASSWORD@your-account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@your-account@"
 GEN_DB_NAME=volvo-service-orders
 GEN_DB_COLLECTION=serviceorders
-GEN_CURSOR_BATCH_SIZE=10000
 
 MIG_TARGET_DB_CONNECTION_STRING="mongodb+srv://your-username:YOUR_PASSWORD@your-cluster.mongodb.net/?retryWrites=false&w=0&appName=YourCluster"
 MIG_TARGET_DB_NAME=volvo-service-orders
 MIG_TARGET_DB_COLLECTION=serviceorders
 
-# Data Generation Settings (GEN_ prefix)
-GEN_BATCH_SIZE=40000
-GEN_TOTAL_DOCUMENTS=22000000
-GEN_WORKERS=8
-GEN_WRITE_WORKERS=16
-GEN_MAX_WORKERS=12
-GEN_MIN_WORKERS=4
-GEN_MAX_WRITE_WORKERS=24
-GEN_MIN_WRITE_WORKERS=8
-
-# Migration Settings (MIG_ prefix)
-MIG_BATCH_SIZE=50000
-MIG_WORKERS=20
-MIG_MAX_WORKERS=30
-MIG_MIN_WORKERS=4
-MIG_PARALLEL_CURSORS=15
-MIG_RESUME_FROM_CHECKPOINT=false
-MIG_MAX_INSERT_WORKERS=50
-MIG_READ_AHEAD_BATCHES=15000
-MIG_READ_AHEAD_WORKERS=1
-MIG_MAX_CONCURRENT_BATCHES=30
+# Optional Overrides (uncomment to customize)
+# MIG_BATCH_SIZE=20000
+# GEN_BATCH_SIZE=50000
 ```
 
-### 3. Test Connection
+### 3. Generate Data (Optional)
 
 ```bash
-python test_connection.py
+# Generate test data using flexible generator
+python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 1000
 ```
 
-### 4. Generate Data (Optional)
+### 4. Run Migration
 
 ```bash
-# Generate test data
-python data_generator.py
-```
-
-### 5. Run Migration
-
-```bash
-# Start migration
-python migrate_to_atlas.py
+# Start migration using flexible migrate
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 ```
 
 ## 📊 Performance Optimization
@@ -180,7 +171,7 @@ volvo-vida/
 │
 ├── 🔧 Utility Scripts
 │   ├── dump_cosmos.sh           # Cosmos DB dump script
-│   └── test_connection.py       # Connection testing
+│   └── restore_to_atlas.sh      # Atlas restore script
 │
 ├── ⚙️ Configuration
 │   ├── .env_local               # Your credentials (not tracked)
@@ -199,37 +190,35 @@ volvo-vida/
 
 ```bash
 # Generate documents using framework
-python flexible_generator.py --generator user_defined/generators/volvo_generator.py
+python flexible_generator.py --source user_defined/generators/volvo_generator.py
 
 # Generate specific amount
 export GEN_TOTAL_DOCUMENTS=1000000
-python flexible_generator.py --generator user_defined/generators/volvo_generator.py
+source venv/bin/activate && FRAMEWORK_PROFILE=dev  python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
 ```
 
 ### Migration
 
 ```bash
 # Full migration with checkpoint support
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 
-# Resume from checkpoint (automatic)
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 
 # Force start from beginning
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --force-from-start
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.pypy --force-from-start
 
 # Disable indexes for optimal performance
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
 ```
 
 ### Index Management
 
 ```bash
 # Create indexes from source database
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --create-indexes
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --create-indexes
 
 # Disable indexes for optimal performance during migration
-python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
 ```
 
 ## 📈 Monitoring and Progress
@@ -334,7 +323,7 @@ print(f"Migration Complete: {cosmos_count == atlas_count}")
 ### Getting Help
 1. **Check logs** for specific error messages
 2. **Verify configuration** in `.env_local`
-3. **Test connections** with `test_connection.py`
+3. **Test data generation** with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5`
 4. **Review performance metrics** in progress bars
 
 ## 📄 License
@@ -343,4 +332,4 @@ This project is provided as-is for Volvo service orders migration purposes.
 
 ---
 
-**Ready to migrate?** Start with `python test_connection.py` to verify your setup! 🚀
+**Ready to migrate?** Start with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5` to test your setup! 🚀

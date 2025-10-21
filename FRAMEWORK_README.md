@@ -70,14 +70,14 @@ nano .env_local
 
 ```bash
 # Generate data using the framework
-python framework_data_generator.py
+python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 1000
 ```
 
 ### 4. Data Migration
 
 ```bash
 # Migrate data using the framework
-python framework_migrate.py
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 ```
 
 ## 📋 Configuration
