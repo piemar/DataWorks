@@ -27,6 +27,8 @@ class DatabaseType(Enum):
     """Supported database types"""
     COSMOS_DB = "cosmos_db"
     MONGODB_ATLAS = "mongodb_atlas"
+    DYNAMODB = "dynamodb"
+    DOCUMENTDB = "documentdb"
 
 @dataclass
 class DatabaseConfig:
@@ -334,11 +336,173 @@ class MongoDBAtlasClient(BaseDatabaseClient):
             self.end_operation(metrics, 0, False, str(e))
             return 0
 
+class DynamoDBClient(BaseDatabaseClient):
+    """
+    DynamoDB client implementation
+    
+    Supports:
+    - DynamoDB Local
+    - AWS DynamoDB
+    - Batch operations
+    - Performance monitoring
+    """
+    
+    def __init__(self, config: DatabaseConfig):
+        super().__init__(config)
+        self.table_name = config.collection_name  # DynamoDB uses table names
+        self.table = None
+        
+    async def connect(self):
+        """Connect to DynamoDB"""
+        try:
+            import boto3
+            from botocore.config import Config
+            
+            # Parse connection string for DynamoDB
+            if self.config.connection_string.startswith("dynamodb://"):
+                # DynamoDB Local
+                endpoint_url = self.config.connection_string.replace("dynamodb://", "http://")
+                self.dynamodb = boto3.resource(
+                    'dynamodb',
+                    endpoint_url=endpoint_url,
+                    region_name='us-east-1',
+                    aws_access_key_id='dummy',
+                    aws_secret_access_key='dummy'
+                )
+            else:
+                # AWS DynamoDB
+                self.dynamodb = boto3.resource('dynamodb')
+            
+            # Get table reference
+            self.table = self.dynamodb.Table(self.table_name)
+            
+            # Test connection
+            await self.table.load()
+            
+            logger.info(f"✅ Connected to DynamoDB table: {self.table_name}")
+            
+        except ImportError:
+            raise ImportError("boto3 is required for DynamoDB support. Install with: pip install boto3")
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to DynamoDB: {e}")
+            raise
+    
+    async def disconnect(self):
+        """Disconnect from DynamoDB"""
+        logger.info("Disconnected from DynamoDB")
+    
+    async def bulk_insert(self, documents: List[Dict], ordered: bool = False) -> int:
+        """Bulk insert documents into DynamoDB"""
+        metrics = self.start_operation("bulk_insert")
+        
+        try:
+            # DynamoDB batch write (max 25 items per batch)
+            batch_size = 25
+            total_inserted = 0
+            
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                
+                with self.table.batch_writer() as batch_writer:
+                    for doc in batch:
+                        batch_writer.put_item(Item=doc)
+                        total_inserted += 1
+            
+            self.end_operation(metrics, total_inserted, True)
+            return total_inserted
+            
+        except Exception as e:
+            self.end_operation(metrics, 0, False, str(e))
+            return 0
+    
+    async def estimated_document_count(self) -> int:
+        """Get estimated document count from DynamoDB"""
+        try:
+            response = self.table.describe_table()
+            return response['Table']['ItemCount']
+        except Exception:
+            return 0
+
+class DocumentDBClient(BaseDatabaseClient):
+    """
+    Amazon DocumentDB client implementation
+    
+    DocumentDB is MongoDB-compatible, so we can reuse MongoDB client
+    with DocumentDB-specific optimizations
+    """
+    
+    def __init__(self, config: DatabaseConfig):
+        super().__init__(config)
+        self.client = None
+        self.database = None
+        self.collection = None
+        
+    async def connect(self):
+        """Connect to DocumentDB"""
+        try:
+            # DocumentDB uses MongoDB-compatible connection strings
+            self.client = AsyncIOMotorClient(
+                self.config.connection_string,
+                maxPoolSize=self.config.max_pool_size,
+                minPoolSize=self.config.min_pool_size,
+                maxIdleTimeMS=self.config.max_idle_time_ms,
+                socketTimeoutMS=self.config.socket_timeout_ms,
+                connectTimeoutMS=self.config.connect_timeout_ms,
+                serverSelectionTimeoutMS=self.config.server_selection_timeout_ms,
+                retryWrites=False,  # DocumentDB doesn't support retryable writes
+                w=0,  # Unacknowledged writes for performance
+                readPreference='primary'  # DocumentDB prefers primary reads
+            )
+            
+            self.database = self.client[self.config.database_name]
+            self.collection = self.database[self.config.collection_name]
+            
+            # Test connection
+            await self.client.admin.command('ping')
+            
+            logger.info(f"✅ Connected to DocumentDB: {self.config.database_name}.{self.config.collection_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to DocumentDB: {e}")
+            raise
+    
+    async def disconnect(self):
+        """Disconnect from DocumentDB"""
+        if self.client:
+            self.client.close()
+        logger.info("Disconnected from DocumentDB")
+    
+    async def bulk_insert(self, documents: List[Dict], ordered: bool = False) -> int:
+        """Bulk insert with DocumentDB optimizations"""
+        metrics = self.start_operation("bulk_insert")
+        
+        try:
+            result = await self.collection.insert_many(documents, ordered=ordered)
+            inserted_count = len(result.inserted_ids)
+            
+            self.end_operation(metrics, inserted_count, True)
+            return inserted_count
+            
+        except Exception as e:
+            self.end_operation(metrics, 0, False, str(e))
+            return 0
+    
+    async def estimated_document_count(self) -> int:
+        """Get estimated document count from DocumentDB"""
+        try:
+            return await self.collection.estimated_document_count()
+        except Exception:
+            return 0
+
 def create_database_client(config: DatabaseConfig) -> BaseDatabaseClient:
     """Factory function to create appropriate database client"""
     if config.db_type == DatabaseType.COSMOS_DB:
         return CosmosDBClient(config)
     elif config.db_type == DatabaseType.MONGODB_ATLAS:
         return MongoDBAtlasClient(config)
+    elif config.db_type == DatabaseType.DYNAMODB:
+        return DynamoDBClient(config)
+    elif config.db_type == DatabaseType.DOCUMENTDB:
+        return DocumentDBClient(config)
     else:
         raise ValueError(f"Unsupported database type: {config.db_type}")

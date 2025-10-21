@@ -321,11 +321,26 @@ async def main():
             logger.info(f"Checkpoint: {checkpoint.documents_migrated:,} documents migrated")
         
         # Execute migration
-        result = await engine.migrate(
-            progress_callback=progress_callback,
-            checkpoint_callback=checkpoint_callback,
-            force_from_start=args.force_from_start
-        )
+        if args.live_migration:
+            logger.info("🚀 Starting live migration with zero downtime...")
+            from framework.migrations.live_migration import LiveMigrationEngine
+            
+            live_engine = LiveMigrationEngine(
+                source_client=engine.source_client,
+                target_client=engine.target_client,
+                migration_strategy=engine.migration_strategy
+            )
+            
+            result = await live_engine.start_live_migration(
+                progress_callback=progress_callback,
+                force_from_start=args.force_from_start
+            )
+        else:
+            result = await engine.migrate(
+                progress_callback=progress_callback,
+                checkpoint_callback=checkpoint_callback,
+                force_from_start=args.force_from_start
+            )
         
         # Print final results
         logger.info("🎉 Migration completed!")

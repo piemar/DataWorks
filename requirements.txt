@@ -12,6 +12,10 @@ dnspython>=1.16.0
 uvloop==0.19.0
 zstandard==0.25.0
 
+# Database Support Dependencies
+boto3>=1.26.0  # DynamoDB support
+botocore>=1.29.0  # AWS SDK core
+
 # Framework Additional Dependencies
 psutil>=5.9.0
 pyyaml>=6.0
