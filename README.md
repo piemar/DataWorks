@@ -314,6 +314,43 @@ DataWorks provides comprehensive real-time monitoring:
    • Retries: 0
 ```
 
+### 📋 **Post-Migration Summary Report**
+
+```
+================================================================================
+📊 DATAWORKS MIGRATION SUMMARY REPORT
+================================================================================
+
+🚀 MIGRATION SUMMARY:
+   • Total Time: 0h 45m 23s
+   • Peak Rate: 4,200 docs/s
+   • Total Errors: 0
+   • Checkpoints Saved: 12
+   • Worker Scales: 3
+
+👥 WORKER STATISTICS:
+   • Final Read Workers: 8
+   • Final Write Workers: 12
+   • Total Workers: 20
+   • Scaling Events: 3
+
+📊 SYSTEM PERFORMANCE:
+   • Average CPU: 45.2%
+   • Average Memory: 78.1%
+   • Peak CPU: 89.3%
+   • Peak Memory: 85.7%
+
+⚡ PERFORMANCE METRICS:
+   • Documents/Second: 4,200
+   • Memory Efficiency: 1.8GB
+   • Error Rate: 0.00%
+   • Checkpoint Frequency: 0.3/min
+
+================================================================================
+✅ MIGRATION COMPLETED SUCCESSFULLY!
+================================================================================
+```
+
 ---
 
 ## 🚨 Troubleshooting

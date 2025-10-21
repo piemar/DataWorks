@@ -222,6 +222,11 @@ class MigrationEngine:
         # Create enhanced progress bar with additional statistics
         progress_desc = "🚀 Migrating data (from start)" if force_from_start else "🚀 Migrating data"
         
+        # Initialize enhanced progress monitoring
+        from framework.monitoring.enhanced_progress import EnhancedProgressMonitor
+        self.progress_monitor = EnhancedProgressMonitor(self.config)
+        self.progress_monitor.initialize_progress_bars(total_docs, migrated_so_far)
+        
         # Initialize statistics tracking
         self.stats = {
             'start_time': time.time(),
@@ -232,28 +237,8 @@ class MigrationEngine:
             'memory_usage': 0
         }
         
-        pbar = tqdm(
-            total=total_docs,
-            desc=progress_desc,
-            unit="docs",
-            unit_scale=True,
-            ncols=140,
-            bar_format='{desc}: {percentage:3.0f}%|{bar:25}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}',
-            colour='blue',
-            smoothing=self.config.performance.progress_smoothing,
-            miniters=self.config.performance.progress_miniters,
-            dynamic_ncols=True,
-            leave=True,
-            initial=migrated_so_far,
-            position=0,  # Ensure progress bar is at top
-            file=sys.stdout
-        )
-        
-        # Set initial postfix with statistics
-        pbar.set_postfix_str("Initializing...")
-        
         # Store progress bar reference for statistics updates
-        self.progress_bar = pbar
+        self.progress_bar = self.progress_monitor.main_pbar
         
         try:
             # Start write workers
@@ -269,41 +254,36 @@ class MigrationEngine:
             logger.error(f"Error during migration: {e}")
             raise
         finally:
-            pbar.close()
+            if hasattr(self, 'progress_monitor'):
+                self.progress_monitor.close_all()
             self.is_running = False
             self.progress_bar = None
         
         # Save migration metadata for reliable resume points
         await self._save_migration_metadata()
         
+        # Generate and print enhanced summary report
+        if hasattr(self, 'progress_monitor') and self.progress_monitor:
+            self.progress_monitor.print_summary_report()
+        
         # Return final statistics
         return self._get_final_stats()
     
     def _update_progress_statistics(self, current_rate: float, documents_migrated: int):
         """Update progress bar with enhanced statistics"""
-        if not hasattr(self, 'progress_bar') or self.progress_bar is None:
-            return
-            
-        # Update peak rate
-        if current_rate > self.stats['peak_rate']:
-            self.stats['peak_rate'] = current_rate
-        
-        # Calculate elapsed time
-        elapsed_time = time.time() - self.stats['start_time']
-        
-        # Get memory usage (simplified)
-        try:
-            import psutil
-            memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
-            self.stats['memory_usage'] = memory_mb
-        except ImportError:
-            memory_mb = 0
-        
-        # Create enhanced statistics string
-        stats_str = f"Peak: {self.stats['peak_rate']:.0f}docs/s | Mem: {memory_mb:.0f}MB | Errors: {self.stats['total_errors']}"
-        
-        # Update progress bar postfix
-        self.progress_bar.set_postfix_str(stats_str)
+        if hasattr(self, 'progress_monitor') and self.progress_monitor:
+            self.progress_monitor.update_main_progress(documents_migrated, current_rate)
+            self.progress_monitor.update_system_metrics()
+    
+    def _show_worker_scale_event(self, event_type: str, old_count: int, new_count: int):
+        """Show worker scaling event"""
+        if hasattr(self, 'progress_monitor') and self.progress_monitor:
+            self.progress_monitor.show_worker_scale_event(event_type, old_count, new_count)
+    
+    def _show_checkpoint_complete(self, checkpoint_info: str):
+        """Show checkpoint completion"""
+        if hasattr(self, 'progress_monitor') and self.progress_monitor:
+            self.progress_monitor.show_snapshot_complete(checkpoint_info)
     
     async def _save_migration_metadata(self):
         """Save migration metadata for reliable resume points"""
