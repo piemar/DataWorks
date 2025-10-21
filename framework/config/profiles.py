@@ -3,7 +3,7 @@ Profile-based Configuration System
 
 This module defines pre-configured profiles for different use cases:
 - data-ingest: High-speed data generation
-- data-migration: High-speed migration with stability  
+- data-migration: High-speed m"igration with stability  
 - dev: Development and testing with minimal resources
 """
 
@@ -109,7 +109,7 @@ PROFILES: Dict[str, Dict[str, Any]] = {
         "use_case": "Testing framework functionality without high resource requirements",
         "settings": {
             # Data Generation Settings (smaller batches for testing)
-            "GEN_BATCH_SIZE": 100,
+            "GEN_BATCH_SIZE": 500000,
             "GEN_WORKERS": 2,
             "GEN_WRITE_WORKERS": 4,
             "GEN_MAX_WORKERS": 4,

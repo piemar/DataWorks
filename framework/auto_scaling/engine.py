@@ -165,26 +165,32 @@ class IntelligentAutoScaler:
                 break
             except Exception as e:
                 logger.error(f"Error in auto-scaling monitoring loop: {e}")
+                logger.debug(f"Auto-scaling error details: {type(e).__name__}: {str(e)}")
                 await asyncio.sleep(5)  # Wait 5 seconds before retrying
     
     async def _process_metrics(self, metrics: PerformanceMetrics):
         """Process performance metrics and make scaling decisions"""
-        # Add to history
-        self.metrics_history.append(metrics)
-        
-        # Skip if not enough data
-        if len(self.metrics_history) < 3:
-            return
-        
-        # Check if we're in cooldown period
-        if time.time() - self.last_scaling_time < self.config.scaling_cooldown:
-            return
-        
-        # Analyze performance and make scaling decision
-        decision = await self._analyze_performance_and_scale()
-        
-        if decision and decision.direction != ScalingDirection.MAINTAIN:
-            await self._execute_scaling_decision(decision)
+        try:
+            # Add to history
+            self.metrics_history.append(metrics)
+            
+            # Skip if not enough data
+            if len(self.metrics_history) < 3:
+                return
+            
+            # Check if we're in cooldown period
+            if time.time() - self.last_scaling_time < self.config.scaling_cooldown:
+                return
+            
+            # Analyze performance and make scaling decision
+            decision = await self._analyze_performance_and_scale()
+            
+            if decision and decision.direction != ScalingDirection.MAINTAIN:
+                await self._execute_scaling_decision(decision)
+                
+        except Exception as e:
+            logger.error(f"Error processing auto-scaling metrics: {e}")
+            logger.debug(f"Metrics processing error details: {type(e).__name__}: {str(e)}")
     
     async def _analyze_performance_and_scale(self) -> Optional[ScalingDecision]:
         """Analyze performance metrics and determine scaling action"""
@@ -223,6 +229,13 @@ class IntelligentAutoScaler:
         
         first_avg = statistics.mean(first_half)
         second_avg = statistics.mean(second_half)
+        
+        # Avoid division by zero
+        if first_avg == 0:
+            if second_avg > 0:
+                return "increasing"
+            else:
+                return "stable"
         
         change_percent = (second_avg - first_avg) / first_avg * 100
         
