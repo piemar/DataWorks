@@ -7,6 +7,7 @@ import asyncio
 import logging
 import sys
 import argparse
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -224,6 +225,11 @@ async def main():
                        help='Explicitly disable indexes during migration (indexes are auto-disabled for optimal performance)')
     parser.add_argument('--force-from-start', action='store_true',
                        help='Force migration to start from the beginning, ignoring any resume points')
+    parser.add_argument('--auto-scaling', action='store_true',
+                       help='Enable intelligent auto-scaling (adaptive workers and batch sizes)')
+    parser.add_argument('--auto-scaling-profile', default='balanced',
+                       choices=['conservative', 'balanced', 'aggressive'],
+                       help='Auto-scaling profile (default: balanced)')
     
     args = parser.parse_args()
     
@@ -274,6 +280,14 @@ async def main():
         
         # Create migration engine
         engine = create_migration_engine(config)
+        
+        # Initialize auto-scaling if enabled
+        if args.auto_scaling:
+            logger.info(f"🚀 Enabling intelligent auto-scaling with profile: {args.auto_scaling_profile}")
+            os.environ["AUTO_SCALING_PROFILE"] = args.auto_scaling_profile
+            await engine.initialize_auto_scaling(enabled=True)
+        else:
+            await engine.initialize_auto_scaling(enabled=False)
         
         # Initialize engine
         if not await engine.initialize():

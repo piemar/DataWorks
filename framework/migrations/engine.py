@@ -20,6 +20,7 @@ from pymongo.errors import InvalidOperation
 from ..core.database import BaseDatabaseClient, DatabaseConfig, DatabaseType, create_database_client
 from ..config.manager import FrameworkConfig, MigrationConfig
 from ..monitoring.metrics import MetricsCollector, OperationType
+from ..auto_scaling import IntelligentAutoScaler, AutoScalingConfigManager, AutoScalingMetricsCollector, OperationType as AutoScalingOperationType
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,11 @@ class MigrationEngine:
         self.last_update_time = 0
         self.last_docs_count = 0
         self.instant_rate = 0
+        
+        # Auto-scaling system
+        self.auto_scaler: Optional[IntelligentAutoScaler] = None
+        self.auto_scaling_metrics_collector: Optional[AutoScalingMetricsCollector] = None
+        self.auto_scaling_enabled = False
     
     async def initialize(self) -> bool:
         """Initialize the migration engine"""
@@ -166,6 +172,56 @@ class MigrationEngine:
         except Exception as e:
             logger.error(f"Failed to initialize migration engine: {e}")
             return False
+    
+    async def initialize_auto_scaling(self, enabled: bool = True):
+        """Initialize the auto-scaling system"""
+        if not enabled:
+            self.auto_scaling_enabled = False
+            return
+        
+        try:
+            # Load auto-scaling configuration
+            config_manager = AutoScalingConfigManager()
+            profile = config_manager.load_from_environment()
+            
+            # Create auto-scaling config
+            auto_scaling_config = AutoScalingConfig(
+                target_docs_per_second=profile.target_docs_per_second,
+                target_cpu_usage=profile.target_cpu_usage,
+                target_memory_usage=profile.target_memory_usage,
+                target_error_rate=profile.target_error_rate,
+                cpu_scale_up_threshold=profile.cpu_scale_up_threshold,
+                cpu_scale_down_threshold=profile.cpu_scale_down_threshold,
+                memory_scale_up_threshold=profile.memory_scale_up_threshold,
+                memory_scale_down_threshold=profile.memory_scale_down_threshold,
+                min_workers=profile.min_workers,
+                max_workers=profile.max_workers,
+                min_batch_size=profile.min_batch_size,
+                max_batch_size=profile.max_batch_size,
+                scaling_check_interval=profile.scaling_check_interval,
+                scaling_cooldown=profile.scaling_cooldown,
+                performance_window_size=profile.performance_window_size,
+                stability_window_size=profile.stability_window_size
+            )
+            
+            # Create auto-scaler
+            self.auto_scaler = IntelligentAutoScaler(auto_scaling_config, AutoScalingOperationType.MIGRATION)
+            
+            # Create metrics collector
+            self.auto_scaling_metrics_collector = AutoScalingMetricsCollector(AutoScalingOperationType.MIGRATION)
+            
+            # Register metrics callbacks
+            self.auto_scaling_metrics_collector.register_metrics_callback(
+                "migration_metrics", 
+                self._collect_migration_metrics
+            )
+            
+            self.auto_scaling_enabled = True
+            logger.info(f"🚀 Auto-scaling initialized with profile: {profile.name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize auto-scaling: {e}")
+            self.auto_scaling_enabled = False
     
     def set_migration_strategy(self, strategy: BaseMigrationStrategy):
         """Set the migration strategy"""
@@ -907,6 +963,38 @@ class MigrationEngine:
             await self.target_client.disconnect()
         
         logger.info("Migration engine cleaned up")
+    
+    async def _collect_migration_metrics(self) -> Dict[str, Any]:
+        """Collect migration-specific metrics for auto-scaling"""
+        try:
+            metrics = {}
+            
+            # Get migration strategy metrics
+            if self.migration_strategy:
+                strategy_stats = self.migration_strategy.get_migration_stats()
+                metrics.update({
+                    'documents_per_second': strategy_stats.get('migration_rate', 0.0),
+                    'operations_per_second': strategy_stats.get('operations_per_second', 0.0),
+                    'error_rate': strategy_stats.get('error_rate', 0.0),
+                    'retry_rate': strategy_stats.get('retry_rate', 0.0),
+                    'active_workers': len(self.write_tasks) if self.write_tasks else 0,
+                    'batch_size': self.config.source_database.batch_size,
+                    'queue_depth': self.write_queue.qsize() if self.write_queue else 0
+                })
+            
+            # Get database performance metrics
+            if self.source_client:
+                source_perf = self.source_client.get_performance_summary()
+                metrics.update({
+                    'ru_consumption': source_perf.get('ru_consumption', 0.0),
+                    'connection_pool_utilization': source_perf.get('connection_pool_utilization', 0.0)
+                })
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Error collecting migration metrics: {e}")
+            return {}
 
 # Factory function for creating migration engines
 def create_migration_engine(config: FrameworkConfig) -> MigrationEngine:
