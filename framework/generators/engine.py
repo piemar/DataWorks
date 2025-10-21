@@ -116,6 +116,7 @@ class DataGenerationEngine:
         # Checkpoint system
         self.checkpoint_file = "generation_checkpoint.json"
         self.checkpoint_interval = 10000  # Save checkpoint every 10k documents
+        self.progress_bar = None
         
     def register_generator(self, generator: BaseDataGenerator):
         """Register a data generator"""
@@ -183,7 +184,7 @@ class DataGenerationEngine:
         await self._start_generation_workers(generator, total_docs)
         
         # Create progress bar
-        pbar = tqdm(
+        self.progress_bar = tqdm(
             total=total_docs,
             desc=f"🚀 Generating {generator_type.value} data",
             unit="docs",
@@ -212,7 +213,9 @@ class DataGenerationEngine:
             logger.error(f"Error during data generation: {e}")
             raise
         finally:
-            pbar.close()
+            if self.progress_bar:
+                self.progress_bar.close()
+                self.progress_bar = None
             self.is_running = False
         
         # Return final statistics
@@ -328,8 +331,8 @@ class DataGenerationEngine:
                         # Generate batch
                         batch = generator.generate_batch(current_batch_size, batch_number)
                         
-                        # Queue for writing (no progress bar here, handled by write workers)
-                        await self.write_queue.put((batch, None))
+                        # Queue for writing with progress bar
+                        await self.write_queue.put((batch, self.progress_bar))
                         
                         remaining_docs -= current_batch_size
                         
@@ -378,15 +381,12 @@ class DataGenerationEngine:
                 self.total_documents_written += inserted_count
                 
                 # Update progress bar if available
-                if pbar:
-                    pbar.update(inserted_count)
-                    self._update_realtime_rate(pbar, inserted_count)
-                    pbar.refresh()  # Force immediate display update
+                if pbar and self.progress_bar:
+                    self.progress_bar.update(inserted_count)
+                    self._update_realtime_rate(self.progress_bar, inserted_count)
+                    self.progress_bar.refresh()  # Force immediate display update
                 
-                # Enhanced logging for better monitoring
-                logger.info(f"📊 Worker {worker_id}: Wrote {inserted_count:,} documents (Total: {self.total_documents_written:,})")
-                
-                # Save checkpoint periodically
+                # Save checkpoint periodically (silent)
                 if self.total_documents_written % self.checkpoint_interval == 0:
                     self._save_checkpoint(GeneratorType.CUSTOM, 1000000, self.total_documents_written)  # TODO: Get actual total
             
@@ -394,8 +394,8 @@ class DataGenerationEngine:
             
         except Exception as e:
             logger.error(f"Worker {worker_id}: Failed to write batch: {e}")
-            if pbar:
-                pbar.update(0)  # Update progress even on failure
+            if pbar and self.progress_bar:
+                self.progress_bar.update(0)  # Update progress even on failure
     
     def _update_realtime_rate(self, pbar, docs_processed: int):
         """Update real-time rate calculation for progress bar"""
