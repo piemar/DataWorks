@@ -301,18 +301,18 @@ DataWorks provides comprehensive real-time monitoring:
 ### 📊 **Real-time Statistics**
 
 ```
-🚀 Migrating data: 67%|██████▋   | 670k/1M [03:22<01:38, 3.3kdocs/s]
-📊 Live Statistics:
-   • Documents migrated: 670,000
-   • Current rate: 3,300 docs/s
-   • Average rate: 3,100 docs/s
-   • Peak rate: 4,200 docs/s
-   • RU consumption: 1,150 RU/s
-   • Memory usage: 1.8GB
-   • ETA: 1m 38s
-   • Errors: 0
-   • Retries: 0
+🚀 Migrating data: 67%|██████▋   | 670k/1M [03:22<01:38, 3.3kdocs/s] Peak: 4.2kdocs/s | Mem: 1.8GB | Errors: 0
+👥 Worker Scaling: 85%|████████▌ | Workers: R:8 W:12 Scales:3
+💾 Checkpoint Save: 100%|██████████| ✅ Checkpoint saved: 670k docs
+📊 Database Performance: 75%|█████████▌ | RU:750/s Pool:45 Queue:12
 ```
+
+**Enhanced Progress Features:**
+- **📊 Multi-progress bars**: Main migration, worker scaling, checkpoints, database performance
+- **⚡ Real-time scaling**: Shows when workers scale up/down
+- **💾 Checkpoint tracking**: Visual progress of checkpoint saves
+- **📈 Database monitoring**: RU consumption, connection pool, queue status
+- **📋 Summary reports**: Comprehensive post-migration analysis
 
 ### 📋 **Post-Migration Summary Report**
 

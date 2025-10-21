@@ -142,14 +142,14 @@ class EnhancedProgressMonitor:
             file=sys.stdout
         )
         
-        # System metrics progress bar
-        self.system_pbar = tqdm(
+        # Database performance progress bar (replaces system metrics)
+        self.db_performance_pbar = tqdm(
             total=100,
-            desc="📊 System Metrics",
+            desc="📊 Database Performance",
             unit="%",
             ncols=120,
             bar_format='{desc}: {percentage:3.0f}%|{bar:15}| {postfix}',
-            colour='red',
+            colour='cyan',
             position=3,
             file=sys.stdout
         )
@@ -208,44 +208,33 @@ class EnhancedProgressMonitor:
                 self.stats['checkpoints_saved'] += 1
                 self.stats['last_checkpoint_time'] = time.time()
     
-    def update_system_metrics(self):
-        """Update system metrics display"""
-        if self.system_pbar:
-            try:
-                import psutil
-                
-                # Get system metrics
-                cpu_percent = psutil.cpu_percent(interval=0.1)
-                memory_percent = psutil.virtual_memory().percent
-                disk_io = psutil.disk_io_counters()
-                network_io = psutil.net_io_counters()
-                
-                # Calculate system load percentage
-                system_load = (cpu_percent + memory_percent) / 2
-                
-                # Create metrics string
-                metrics_str = f"CPU:{cpu_percent:.1f}% RAM:{memory_percent:.1f}% Load:{system_load:.1f}%"
-                
-                self.system_pbar.n = system_load
-                self.system_pbar.set_postfix_str(metrics_str)
-                self.system_pbar.refresh()
-                
-                # Store metrics for summary
-                with self.metrics_lock:
-                    self.system_metrics.append(SystemMetrics(
-                        cpu_usage=cpu_percent,
-                        memory_usage=memory_percent,
-                        disk_io=disk_io.read_bytes + disk_io.write_bytes if disk_io else 0,
-                        network_io=network_io.bytes_sent + network_io.bytes_recv if network_io else 0,
-                        timestamp=time.time()
-                    ))
-                    
-                    # Keep only last 100 metrics
-                    if len(self.system_metrics) > 100:
-                        self.system_metrics = self.system_metrics[-100:]
-                        
-            except ImportError:
-                self.system_pbar.set_postfix_str("psutil not available")
+    def update_database_performance(self, ru_consumption: float = 0, throttling_detected: bool = False, 
+                                  connection_pool_size: int = 0, queue_size: int = 0):
+        """Update database performance metrics"""
+        if self.db_performance_pbar:
+            # Calculate performance percentage based on RU consumption and throttling
+            if ru_consumption > 0:
+                # Normalize RU consumption to percentage (assuming 1000 RU/s is 100%)
+                performance_percent = min(100, (ru_consumption / 1000) * 100)
+            else:
+                performance_percent = 50  # Default middle value
+            
+            # Create performance string with useful metrics
+            perf_parts = []
+            if ru_consumption > 0:
+                perf_parts.append(f"RU:{ru_consumption:.0f}/s")
+            if connection_pool_size > 0:
+                perf_parts.append(f"Pool:{connection_pool_size}")
+            if queue_size > 0:
+                perf_parts.append(f"Queue:{queue_size}")
+            if throttling_detected:
+                perf_parts.append("⚠️THROTTLED")
+            
+            perf_str = " ".join(perf_parts) if perf_parts else "Initializing..."
+            
+            self.db_performance_pbar.n = performance_percent
+            self.db_performance_pbar.set_postfix_str(perf_str)
+            self.db_performance_pbar.refresh()
     
     def show_snapshot_complete(self, snapshot_info: str):
         """Show snapshot/checkpoint completion"""
@@ -350,7 +339,7 @@ class EnhancedProgressMonitor:
             self.worker_pbar.close()
         if self.checkpoint_pbar:
             self.checkpoint_pbar.close()
-        if self.system_pbar:
-            self.system_pbar.close()
+        if self.db_performance_pbar:
+            self.db_performance_pbar.close()
         
         self.is_running = False

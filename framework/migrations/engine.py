@@ -211,8 +211,15 @@ class MigrationEngine:
             logger.info("🚀 Force from start: Progress bar starting from 0")
         else:
             try:
-                migrated_so_far = await self.target_client.get_estimated_count()
-                logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents")
+                # Use resume point to calculate starting position more accurately
+                if resume_from:
+                    # Count documents before resume point in source
+                    count_query = {"_id": {"$lt": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
+                    migrated_so_far = await self.source_client.collection.count_documents(count_query)
+                    logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (based on resume point)")
+                else:
+                    migrated_so_far = await self.target_client.get_estimated_count()
+                    logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (target count)")
             except Exception:
                 migrated_so_far = 0
                 logger.info("📊 Progress bar starting from 0 (could not get target count)")
@@ -273,7 +280,18 @@ class MigrationEngine:
         """Update progress bar with enhanced statistics"""
         if hasattr(self, 'progress_monitor') and self.progress_monitor:
             self.progress_monitor.update_main_progress(documents_migrated, current_rate)
-            self.progress_monitor.update_system_metrics()
+            
+            # Update database performance metrics instead of system metrics
+            ru_consumption = self.stats.get('ru_consumption', 0)
+            queue_size = self.write_queue.qsize() if hasattr(self, 'write_queue') else 0
+            connection_pool_size = getattr(self.source_client, 'pool_size', 0)
+            
+            self.progress_monitor.update_database_performance(
+                ru_consumption=ru_consumption,
+                throttling_detected=False,  # Could be enhanced to detect throttling
+                connection_pool_size=connection_pool_size,
+                queue_size=queue_size
+            )
     
     def _show_worker_scale_event(self, event_type: str, old_count: int, new_count: int):
         """Show worker scaling event"""
@@ -623,7 +641,16 @@ class MigrationEngine:
             
             # ULTRA-FAST real-time progress update (immediate)
             if progress_monitor and stats['migrated'] > 0:
-                # Update progress through the enhanced monitor
+                # Update migration strategy document count
+                self.migration_strategy.documents_migrated += stats['migrated']
+                
+                # Update progress immediately for real-time feedback
+                if hasattr(progress_monitor, 'main_pbar') and progress_monitor.main_pbar:
+                    # Update with incremental count, not total
+                    progress_monitor.main_pbar.update(stats['migrated'])
+                    progress_monitor.main_pbar.refresh()  # Force immediate display update
+                
+                # Also update through enhanced monitor
                 current_rate = stats['migrated'] / (time.time() - batch_start_time)
                 self._update_progress_statistics(current_rate, stats['migrated'])
             
