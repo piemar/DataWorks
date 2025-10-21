@@ -17,7 +17,7 @@ from tqdm import tqdm
 from ..core.database import BaseDatabaseClient, DatabaseConfig, DatabaseType, create_database_client
 from ..config.manager import FrameworkConfig, DataGenerationConfig
 from ..monitoring.metrics import MetricsCollector, OperationType
-from ..auto_scaling import IntelligentAutoScaler, AutoScalingConfigManager, AutoScalingMetricsCollector, OperationType as AutoScalingOperationType
+from ..auto_scaling import IntelligentAutoScaler, AutoScalingConfigManager, AutoScalingMetricsCollector, OperationType as AutoScalingOperationType, AutoScalingConfig
 
 logger = logging.getLogger(__name__)
 
