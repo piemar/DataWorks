@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flexible Migration Script - Framework Version
+DataWorks Flexible Migration Script
 Supports default strategy, builtin strategies, and custom strategies
 """
 import asyncio

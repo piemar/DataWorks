@@ -1,10 +1,10 @@
 """
-Volvo Data Framework
+DataWorks Framework
 Enterprise-ready framework for data generation and migration
 """
 
 __version__ = "1.0.0"
-__author__ = "Volvo Data Team"
+__author__ = "DataWorks Team"
 
 # Core components
 from .core.database import (

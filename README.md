@@ -1,12 +1,12 @@
-# 🚀 Volvo Data Framework
+# 🚀 DataWorks
 
 ## Enterprise-Ready Data Generation and Migration Solution
 
-A comprehensive, enterprise-ready framework for data generation and migration operations, specifically designed for Volvo service orders data. Built with modularity, scalability, and maintainability in mind.
+A comprehensive, enterprise-ready framework for data generation and migration operations, specifically designed for large-scale MongoDB migrations (100GB+). Built with modularity, scalability, and maintainability in mind. DataWorks handles migrations that existing tools like Compass, mongorestore, mongodump, mongoexport, mongoimport, and LiveMirror cannot support.
 
 ## 🎯 Project Purpose
 
-This project provides a complete data migration solution for Volvo service orders, designed to handle large-scale data operations (60M+ documents) with maximum speed and reliability. It includes:
+This project provides a complete data migration solution designed to handle large-scale data operations (100GB+, 60M+ documents) with maximum speed and reliability. DataWorks includes:
 
 - **🏗️ Modular Framework**: Pluggable components for easy customization and extension
 - **⚡ High-Performance Migration**: Optimized for maximum speed with parallel processing
@@ -58,9 +58,9 @@ cp .env_local.example .env_local
 nano .env_local
 ```
 
-**🎯 NEW: Profile-Based Configuration**
+**🎯 NEW: DataWorks Profile-Based Configuration**
 
-Instead of managing 100+ configuration parameters, you now only need to:
+Instead of managing 100+ configuration parameters, DataWorks now only requires:
 
 1. **Choose a profile** based on your use case:
    - `data-ingest`: High-speed data generation (40k+ docs/s)
@@ -141,7 +141,7 @@ The project uses a secure environment variable setup:
 
 ```
 volvo-vida/
-├── 🏗️ Framework Core
+├── 🏗️ DataWorks Framework Core
 │   ├── framework/
 │   │   ├── core/                 # Core database operations
 │   │   │   └── database.py      # Base database clients
@@ -189,11 +189,13 @@ volvo-vida/
 ### Data Generation
 
 ```bash
-# Generate documents using framework
+# Generate documents using framework using python generator
 python flexible_generator.py --source user_defined/generators/volvo_generator.py
 
-# Generate specific amount
-export GEN_TOTAL_DOCUMENTS=1000000
+source venv/bin/activate && FRAMEWORK_PROFILE=dev  python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
+
+
+# Generate specific amount using json generator
 source venv/bin/activate && FRAMEWORK_PROFILE=dev  python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
 ```
 
@@ -205,7 +207,7 @@ source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_mig
 
 
 # Force start from beginning
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.pypy --force-from-start
+source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --force-from-start
 
 # Disable indexes for optimal performance
 source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
@@ -332,4 +334,4 @@ This project is provided as-is for Volvo service orders migration purposes.
 
 ---
 
-**Ready to migrate?** Start with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5` to test your setup! 🚀
+**Ready to migrate?** Start with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5` to test your DataWorks setup! 🚀

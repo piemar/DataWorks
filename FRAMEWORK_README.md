@@ -1,8 +1,8 @@
-# 🚀 Volvo Data Framework
+# 🚀 DataWorks Framework
 
 ## Enterprise-Ready Data Generation and Migration Framework
 
-The Volvo Data Framework is a comprehensive, enterprise-ready solution for data generation and migration operations. Built with modularity, scalability, and maintainability in mind, it provides a robust foundation for handling large-scale data operations with maximum performance and reliability.
+DataWorks is a comprehensive, enterprise-ready solution for data generation and migration operations. Built with modularity, scalability, and maintainability in mind, it provides a robust foundation for handling large-scale data operations (100GB+) with maximum performance and reliability. DataWorks handles migrations that existing tools like Compass, mongorestore, mongodump, mongoexport, mongoimport, and LiveMirror cannot support.
 
 ## 🎯 Key Features
 
@@ -18,7 +18,7 @@ The Volvo Data Framework is a comprehensive, enterprise-ready solution for data 
 ## 🏗️ Architecture Overview
 
 ```
-framework/
+dataworks/
 ├── core/                    # Core database operations
 │   └── database.py         # Base database clients (CosmosDB, Atlas)
 ├── config/                 # Configuration management
@@ -59,8 +59,8 @@ pip install -r requirements.txt
 ### 2. Configuration
 
 ```bash
-# Copy framework configuration
-cp framework_config.env .env_local
+# Copy DataWorks configuration
+cp .env_local.example .env_local
 
 # Edit with your credentials
 nano .env_local
@@ -69,20 +69,20 @@ nano .env_local
 ### 3. Data Generation
 
 ```bash
-# Generate data using the framework
+# Generate data using DataWorks
 python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 1000
 ```
 
 ### 4. Data Migration
 
 ```bash
-# Migrate data using the framework
+# Migrate data using DataWorks
 python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 ```
 
 ## 📋 Configuration
 
-The framework uses a comprehensive configuration system with environment variables:
+DataWorks uses a comprehensive configuration system with environment variables:
 
 ### Database Configuration
 

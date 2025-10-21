@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flexible Data Generator - Framework Version
+DataWorks Flexible Data Generator
 Supports JSON samples, Python generators, and builtin generators
 """
 import asyncio
