@@ -190,7 +190,9 @@ class MigrationEngine:
         if not force_from_start:
             resume_from = await self.migration_strategy.get_resume_point(force_from_start=force_from_start)
             if resume_from:
-                logger.info(f"Resuming migration from: {resume_from}")
+                logger.info(f"✅ Resume point found: {resume_from}")
+            else:
+                logger.info("❌ No resume point found - will start from beginning")
         else:
             logger.info("🚀 Force from start enabled - starting migration from beginning")
         
@@ -203,6 +205,7 @@ class MigrationEngine:
         
         # Get total document count for progress bar
         total_docs = await self.source_client.get_estimated_count()
+        logger.info(f"📊 Total documents in source: {total_docs:,}")
         
         # Seed progress with already migrated docs in target (estimated)
         # Skip seeding if force_from_start is True
@@ -213,6 +216,7 @@ class MigrationEngine:
             try:
                 # Use resume point to calculate starting position more accurately
                 if resume_from:
+                    logger.info(f"📊 Calculating migrated count using resume point: {resume_from}")
                     # Count documents that have already been migrated (documents with _id <= resume_from)
                     # The resume_from is the last document that was successfully migrated
                     count_query = {"_id": {"$lte": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
@@ -228,9 +232,11 @@ class MigrationEngine:
                         migrated_so_far = await self.target_client.get_estimated_count()
                         logger.info(f"📊 Fallback: Using target count {migrated_so_far:,} documents")
                 else:
+                    logger.info("📊 No resume point - using target database count")
                     migrated_so_far = await self.target_client.get_estimated_count()
                     logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (target count)")
-            except Exception:
+            except Exception as e:
+                logger.error(f"❌ Error calculating migrated count: {e}")
                 migrated_so_far = 0
                 logger.info("📊 Progress bar starting from 0 (could not get target count)")
         
@@ -258,6 +264,7 @@ class MigrationEngine:
         
         # Log the progress bar initialization
         logger.info(f"📊 Progress bar initialized: {migrated_so_far:,}/{total_docs:,} documents ({migrated_so_far/total_docs*100:.1f}%)")
+        logger.info(f"📊 Migration strategy documents_migrated set to: {self.migration_strategy.documents_migrated:,}")
         
         # Store progress bar reference for statistics updates
         self.progress_bar = pbar
