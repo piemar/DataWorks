@@ -208,36 +208,18 @@ class MigrationEngine:
         total_docs = await self.source_client.get_estimated_count()
         logger.info(f"📊 Total documents in source: {total_docs:,}")
         
-        # Seed progress with already migrated docs in target (estimated)
+        # Seed progress with already migrated docs in target (simple and fast)
         # Skip seeding if force_from_start is True
         if force_from_start:
             migrated_so_far = 0
             logger.info("🚀 Force from start: Progress bar starting from 0")
         else:
             try:
-                # Use resume point to calculate starting position more accurately
-                if resume_from:
-                    logger.info(f"📊 Calculating migrated count using resume point: {resume_from}")
-                    # Count documents that have already been migrated (documents with _id <= resume_from)
-                    # The resume_from is the last document that was successfully migrated
-                    count_query = {"_id": {"$lte": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
-                    migrated_so_far = await self.source_client.collection.count_documents(count_query)
-                    logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (based on resume point)")
-                    logger.info(f"📊 Resume point: {resume_from}")
-                    logger.info(f"📊 Count query: {count_query}")
-                    
-                    # Verify this makes sense - migrated_so_far should be > 0 when resuming
-                    if migrated_so_far == 0:
-                        logger.warning("⚠️ Resume point found but count is 0 - this might indicate an issue")
-                        # Fallback to target count
-                        migrated_so_far = await self.target_client.get_estimated_count()
-                        logger.info(f"📊 Fallback: Using target count {migrated_so_far:,} documents")
-                else:
-                    logger.info("📊 No resume point - using target database count")
-                    migrated_so_far = await self.target_client.get_estimated_count()
-                    logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (target count)")
+                # Simple approach: count documents in target database = already migrated
+                migrated_so_far = await self.target_client.get_estimated_count()
+                logger.info(f"📊 Progress bar starting from {migrated_so_far:,} documents (target database count)")
             except Exception as e:
-                logger.error(f"❌ Error calculating migrated count: {e}")
+                logger.error(f"❌ Error getting target count: {e}")
                 migrated_so_far = 0
                 logger.info("📊 Progress bar starting from 0 (could not get target count)")
         
