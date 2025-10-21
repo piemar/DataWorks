@@ -78,8 +78,17 @@ python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py 
 
 ### **Enable Auto-Scaling for Generation**
 ```bash
-# Generate data with auto-scaling
+# Generate data with balanced auto-scaling (default)
 python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling
+
+# Use aggressive profile for maximum generation performance
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling --auto-scaling-profile aggressive
+
+# Use conservative profile for stable generation environments
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling --auto-scaling-profile conservative
+
+# Combine with resume functionality
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling --resume
 ```
 
 ## ⚙️ Configuration
@@ -201,6 +210,13 @@ If auto-scaling encounters issues:
 3. **Adjust targets** based on your specific requirements
 4. **Use conservative profile** for production environments
 5. **Test with aggressive profile** for maximum performance
+
+### **For Generation:**
+- **Adaptive generation workers** based on document complexity and system resources
+- **Dynamic batch sizing** for optimal memory usage and processing efficiency
+- **Real-time throughput optimization** based on database performance
+- **Automatic resource management** to prevent memory/CPU bottlenecks
+- **Intelligent scaling** based on document generation complexity
 
 ## 🔮 Future Enhancements
 

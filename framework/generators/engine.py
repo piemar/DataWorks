@@ -17,6 +17,7 @@ from tqdm import tqdm
 from ..core.database import BaseDatabaseClient, DatabaseConfig, DatabaseType, create_database_client
 from ..config.manager import FrameworkConfig, DataGenerationConfig
 from ..monitoring.metrics import MetricsCollector, OperationType
+from ..auto_scaling import IntelligentAutoScaler, AutoScalingConfigManager, AutoScalingMetricsCollector, OperationType as AutoScalingOperationType
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,11 @@ class DataGenerationEngine:
         self.checkpoint_interval = 10000  # Save checkpoint every 10k documents
         self.progress_bar = None
         
+        # Auto-scaling system
+        self.auto_scaler: Optional[IntelligentAutoScaler] = None
+        self.auto_scaling_metrics_collector: Optional[AutoScalingMetricsCollector] = None
+        self.auto_scaling_enabled = False
+        
     def register_generator(self, generator: BaseDataGenerator):
         """Register a data generator"""
         self.generators[generator.generator_type] = generator
@@ -155,6 +161,56 @@ class DataGenerationEngine:
         except Exception as e:
             logger.error(f"Failed to initialize generation engine: {e}")
             return False
+    
+    async def initialize_auto_scaling(self, enabled: bool = True):
+        """Initialize the auto-scaling system for data generation"""
+        if not enabled:
+            self.auto_scaling_enabled = False
+            return
+        
+        try:
+            # Load auto-scaling configuration
+            config_manager = AutoScalingConfigManager()
+            profile = config_manager.load_from_environment()
+            
+            # Create auto-scaling config
+            auto_scaling_config = AutoScalingConfig(
+                target_docs_per_second=profile.target_docs_per_second,
+                target_cpu_usage=profile.target_cpu_usage,
+                target_memory_usage=profile.target_memory_usage,
+                target_error_rate=profile.target_error_rate,
+                cpu_scale_up_threshold=profile.cpu_scale_up_threshold,
+                cpu_scale_down_threshold=profile.cpu_scale_down_threshold,
+                memory_scale_up_threshold=profile.memory_scale_up_threshold,
+                memory_scale_down_threshold=profile.memory_scale_down_threshold,
+                min_workers=profile.min_workers,
+                max_workers=profile.max_workers,
+                min_batch_size=profile.min_batch_size,
+                max_batch_size=profile.max_batch_size,
+                scaling_check_interval=profile.scaling_check_interval,
+                scaling_cooldown=profile.scaling_cooldown,
+                performance_window_size=profile.performance_window_size,
+                stability_window_size=profile.stability_window_size
+            )
+            
+            # Create auto-scaler
+            self.auto_scaler = IntelligentAutoScaler(auto_scaling_config, AutoScalingOperationType.GENERATION)
+            
+            # Create metrics collector
+            self.auto_scaling_metrics_collector = AutoScalingMetricsCollector(AutoScalingOperationType.GENERATION)
+            
+            # Register metrics callbacks
+            self.auto_scaling_metrics_collector.register_metrics_callback(
+                "generation_metrics", 
+                self._collect_generation_metrics
+            )
+            
+            self.auto_scaling_enabled = True
+            logger.info(f"🚀 Auto-scaling initialized for generation with profile: {profile.name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize auto-scaling for generation: {e}")
+            self.auto_scaling_enabled = False
     
     async def generate_data(self, 
                           generator_type: GeneratorType, 
@@ -485,6 +541,44 @@ class DataGenerationEngine:
                 logger.info("🗑️ Checkpoint cleared")
         except Exception as e:
             logger.error(f"Failed to clear checkpoint: {e}")
+    
+    async def _collect_generation_metrics(self) -> Dict[str, Any]:
+        """Collect generation-specific metrics for auto-scaling"""
+        try:
+            metrics = {}
+            
+            # Get generation metrics
+            if hasattr(self, 'total_documents_written'):
+                # Calculate documents per second
+                current_time = time.time()
+                if hasattr(self, 'generation_start_time'):
+                    elapsed_time = current_time - self.generation_start_time
+                    if elapsed_time > 0:
+                        metrics['documents_per_second'] = self.total_documents_written / elapsed_time
+                
+                metrics.update({
+                    'operations_per_second': metrics.get('documents_per_second', 0.0),
+                    'error_rate': 0.0,  # Generation typically has low error rates
+                    'retry_rate': 0.0,
+                    'active_workers': len(self.generation_tasks) if self.generation_tasks else 0,
+                    'idle_workers': 0,  # Generation workers are always active
+                    'batch_size': self.config.source_database.generation_batch_size,
+                    'queue_depth': self.generation_queue.qsize() if self.generation_queue else 0
+                })
+            
+            # Get database performance metrics
+            if self.db_client:
+                db_perf = self.db_client.get_performance_summary()
+                metrics.update({
+                    'ru_consumption': db_perf.get('ru_consumption', 0.0),
+                    'connection_pool_utilization': db_perf.get('connection_pool_utilization', 0.0)
+                })
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Error collecting generation metrics: {e}")
+            return {}
 
 # Factory function for creating generation engines
 def create_generation_engine(config: FrameworkConfig) -> DataGenerationEngine:

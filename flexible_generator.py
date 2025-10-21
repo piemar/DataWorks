@@ -7,6 +7,7 @@ import asyncio
 import logging
 import sys
 import argparse
+import os
 from pathlib import Path
 
 # Add framework to path
@@ -52,6 +53,11 @@ async def main():
                        help='Resume generation from last checkpoint')
     parser.add_argument('--force-from-start', action='store_true',
                        help='Force start from beginning, ignoring any checkpoint')
+    parser.add_argument('--auto-scaling', action='store_true',
+                       help='Enable intelligent auto-scaling (adaptive workers and batch sizes)')
+    parser.add_argument('--auto-scaling-profile', default='balanced',
+                       choices=['conservative', 'balanced', 'aggressive'],
+                       help='Auto-scaling profile (default: balanced)')
     
     args = parser.parse_args()
     
@@ -101,8 +107,12 @@ async def main():
                 print("   No templates directory found")
             
             print("📖 Example Usage:")
-            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json")
-            print("   python flexible_generator.py --source user_defined/templates/user_profiles/user_profile_template.json")
+            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 100000")
+            print("   python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 500000")
+            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling")
+            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --auto-scaling --auto-scaling-profile aggressive")
+            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --resume")
+            print("   python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000 --force-from-start")
             
             return 0
         
@@ -129,6 +139,14 @@ async def main():
         
         # Create generation engine
         engine = create_generation_engine(config)
+        
+        # Initialize auto-scaling if enabled
+        if args.auto_scaling:
+            logger.info(f"🚀 Enabling intelligent auto-scaling for generation with profile: {args.auto_scaling_profile}")
+            os.environ["AUTO_SCALING_PROFILE"] = args.auto_scaling_profile
+            await engine.initialize_auto_scaling(enabled=True)
+        else:
+            await engine.initialize_auto_scaling(enabled=False)
         
         # Register generator
         engine.register_generator(generator)
