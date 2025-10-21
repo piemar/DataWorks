@@ -1,254 +1,240 @@
 # 🚀 DataWorks
 
-## Enterprise-Ready Data Generation and Migration Solution
+**Enterprise Data Migration & Generation Framework**
 
-A comprehensive, enterprise-ready framework for data generation and migration operations, specifically designed for large-scale MongoDB migrations (100GB+). Built with modularity, scalability, and maintainability in mind. DataWorks handles migrations that existing tools like Compass, mongorestore, mongodump, mongoexport, mongoimport, and LiveMirror cannot support.
+DataWorks handles large-scale migrations of NoSQL legacy databases, such CosmosDB RU With MongoDB API, version 3.6, or MongoDB versions lower than 4 and up. The existing tools like Compass, mongorestore, mongodump, mongoexport, mongoimport, and LiveMirror cannot support. 
 
-## 🎯 Project Purpose
+DataWorks focuses on handling large-scale migrations of NoSQL legacy databases, such CosmosDB RU With MongoDB API, version 3.6, or MongoDB versions lower than 4 and up. The existing tools like Compass, mongorestore, mongodump, mongoexport, mongoimport, and LiveMirror cannot support.  Also, DataWorks provides a flexible data generation engine with support for JSON templates, Python generators, and builtin generators. 
 
-This project provides a complete data migration solution designed to handle large-scale data operations (100GB+, 60M+ documents) with maximum speed and reliability. DataWorks includes:
+Dataworks data generation engine supports JSON templates, Python generators, and builtin generators. Domain templates are included to easy get started with your own data generation. E.g service orders, user profiles, products, orders, etc.
 
-- **🏗️ Modular Framework**: Pluggable components for easy customization and extension
-- **⚡ High-Performance Migration**: Optimized for maximum speed with parallel processing
-- **🔄 Resumable Operations**: Checkpoint-based migration that can resume from interruptions
-- **📊 Real-time Monitoring**: Track progress with detailed performance metrics
-- **🛡️ Enterprise Ready**: Error handling, logging, and configuration management
-- **🔧 Extensible**: Easy to add new generators and migration strategies
+Dataworks data migration engine supports custom migration strategies. You can create your own migration strategy by extending the BaseMigrationStrategy class. E.g. migrate service orders to user profiles, migrate products to orders, etc. Custom strategies are supported to handle complex migrations with custom logic.
 
-## 🚀 Key Features
+---
 
-- ⚡ **Maximum Speed Optimization**: Unacknowledged writes, direct batch inserts, optimized connection pools
-- 🔄 **Resumable Migration**: Automatic checkpoint system for large migrations
-- 📊 **Real-time Progress**: Live progress bars with RU consumption and performance metrics
-- 🛡️ **Error Recovery**: Intelligent retry logic with exponential backoff
-- 🎯 **Production Ready**: Handles 60M+ documents with optimized settings
-- 🏗️ **Modular Architecture**: Clean separation of concerns with pluggable components
-- 🔧 **Framework-Based**: Reusable components for different data types and migration scenarios
+## 🎯 What is DataWorks?
 
-## 📋 Prerequisites
+DataWorks is a professional-grade framework designed for:
+- **Large-scale migrations** (100GB+, 60M+ documents)
+- **Legacy MongoDB versions** (Cosmos DB, Atlas, self-hosted)
+- **Enterprise reliability** with checkpoint recovery
+- **Maximum performance** with parallel processing
 
-- **Python 3.8+**
-- **Azure Cosmos DB** account with MongoDB API
-- **MongoDB Atlas** cluster (M10+ recommended for large datasets)
-- **Network connectivity** to both databases
-- **Sufficient resources**: 8GB+ RAM, stable internet connection
+### Why DataWorks?
 
-## 🛠️ Quick Start
+| Existing Tools | DataWorks |
+|---|---|
+| ❌ Compass | ✅ Handles 100GB+ datasets |
+| ❌ mongorestore | ✅ Resumable migrations |
+| ❌ mongodump | ✅ Real-time progress tracking |
+| ❌ mongoexport/import | ✅ Enterprise error handling |
+| ❌ LiveMirror | ✅ Custom migration strategies |
 
-### 1. Clone and Setup
+---
+
+## 🚀 Quick Start (5 minutes)
+
+### 1. Install DataWorks
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd volvo-vida
-
-# Install dependencies
+# Clone and setup
+git clone https://github.com/piemar/data-migrator.git
+cd data-migrator
 python3 -m venv venv
 source venv/bin/activate
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Configure Your Databases
 
 ```bash
-# Copy the template
+# Copy configuration template
 cp .env_local.example .env_local
 
-# Edit with your credentials
+# Edit with your connection strings
 nano .env_local
 ```
 
-**🎯 NEW: DataWorks Profile-Based Configuration**
-
-Instead of managing 100+ configuration parameters, DataWorks now only requires:
-
-1. **Choose a profile** based on your use case:
-   - `data-ingest`: High-speed data generation (40k+ docs/s)
-   - `data-migration`: High-speed migration with stability (4k-8k docs/s)  
-   - `dev`: Development and testing (minimal resources)
-
-2. **Set your database connection strings**
-
-3. **Optionally override specific settings**
-
-**Required Configuration:**
+**Required settings in `.env_local`:**
 ```env
-# Profile Selection (choose one)
+# Choose your profile
 FRAMEWORK_PROFILE=data-migration
 
-# Database Configuration (REQUIRED)
-GEN_DB_CONNECTION_STRING="mongodb://your-account:YOUR_PASSWORD@your-account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@your-account@"
-GEN_DB_NAME=volvo-service-orders
-GEN_DB_COLLECTION=serviceorders
+# Source database (where your data is)
+GEN_DB_CONNECTION_STRING="mongodb://your-cosmos-connection-string"
+GEN_DB_NAME=your-source-database
+GEN_DB_COLLECTION=your-collection
 
-MIG_TARGET_DB_CONNECTION_STRING="mongodb+srv://your-username:YOUR_PASSWORD@your-cluster.mongodb.net/?retryWrites=false&w=0&appName=YourCluster"
-MIG_TARGET_DB_NAME=volvo-service-orders
-MIG_TARGET_DB_COLLECTION=serviceorders
-
-# Optional Overrides (uncomment to customize)
-# MIG_BATCH_SIZE=20000
-# GEN_BATCH_SIZE=50000
+# Target database (where you want to migrate)
+MIG_TARGET_DB_CONNECTION_STRING="mongodb+srv://your-atlas-connection-string"
+MIG_TARGET_DB_NAME=your-target-database
+MIG_TARGET_DB_COLLECTION=your-collection
 ```
 
-### 3. Generate Data (Optional)
+### 3. Test Data Generation
 
 ```bash
-# Generate test data using flexible generator
-python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 1000
+# Generate 5 test documents
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
 ```
 
 ### 4. Run Migration
 
 ```bash
-# Start migration using flexible migrate
+# Migrate your data
 python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 ```
 
-## 📊 Performance Optimization
+**That's it!** 🎉
 
-### Current Optimized Settings
+---
 
-The project is configured for **maximum speed** with these optimizations:
+## 📊 Performance Profiles
 
-- **Write Concern**: Unacknowledged writes (`w=0`) for fire-and-forget performance
-- **Batch Sizes**: 2000-4000 documents per batch
-- **Concurrent Workers**: 12 workers for parallel processing
-- **Connection Pools**: 100-200 connections for high concurrency
-- **Error Handling**: Minimal retry logic (2 attempts, 0.1s delay)
+DataWorks comes with three optimized profiles:
 
-### Expected Performance
+| Profile | Use Case | Performance | Resources |
+|---------|----------|-------------|-----------|
+| `dev` | Testing & Development | 1k docs/s | Minimal |
+| `data-migration` | Production Migration | 4k-8k docs/s | Balanced |
+| `data-ingest` | High-Speed Generation | 40k+ docs/s | Maximum |
 
-- **Data Generation**: 15,000-25,000 documents/second
-- **Migration**: 8,000-15,000 documents/second
-- **60M Documents**: ~1-2 hours (generation) + ~1-2 hours (migration)
-
-## 🔧 Environment Setup
-
-### Secure Credential Management
-
-The project uses a secure environment variable setup:
-
-- **`.env_local`**: Your actual sensitive credentials (NOT tracked by Git)
-- **`.env_local.example`**: Template for other developers (tracked by Git)
-- **`config.env`**: Example values only (tracked by Git)
-
-**For Team Members:**
-1. Copy `.env_local.example` to `.env_local`
-2. Fill in your actual credentials in `.env_local`
-3. Never commit `.env_local` to version control
-
-## 📁 Project Structure
-
-```
-volvo-vida/
-├── 🏗️ DataWorks Framework Core
-│   ├── framework/
-│   │   ├── core/                 # Core database operations
-│   │   │   └── database.py      # Base database clients
-│   │   ├── config/              # Configuration management
-│   │   │   └── manager.py       # Configuration system
-│   │   ├── generators/          # Data generation framework
-│   │   │   ├── engine.py        # Generation engine
-│   │   │   ├── factory.py       # Generator factory
-│   │   │   └── json_sample_generator.py # JSON-based generator
-│   │   ├── migrations/          # Migration framework
-│   │   │   ├── engine.py        # Migration engine
-│   │   │   ├── factory.py       # Strategy factory
-│   │   │   └── default_strategy.py # Default migration strategy
-│   │   └── monitoring/          # Monitoring and metrics
-│   │       └── metrics.py       # Metrics collection
-│   │
-│   ├── user_defined/            # User-specific implementations
-│   │   ├── generators/          # Custom data generators
-│   │   │   └── volvo_generator.py # Volvo service order generator
-│   │   ├── strategies/          # Custom migration strategies
-│   │   │   └── volvo_strategy.py # Volvo migration strategy
-│   │   └── templates/           # JSON templates for generation
-│   │       └── service_order_template.json
-│   │
-│   ├── flexible_migrate.py      # Main migration script
-│   └── flexible_generator.py    # Main data generation script
-│
-├── 🔧 Utility Scripts
-│   ├── dump_cosmos.sh           # Cosmos DB dump script
-│   └── restore_to_atlas.sh      # Atlas restore script
-│
-├── ⚙️ Configuration
-│   ├── .env_local               # Your credentials (not tracked)
-│   ├── .env_local.example       # Template for developers
-│   └── requirements.txt         # Python dependencies
-│
-└── 📚 Documentation
-    ├── README.md                # This file
-    ├── FRAMEWORK_README.md      # Framework documentation
-    └── CUSTOM_STRATEGIES_GUIDE.md # Custom strategy guide
+**Change profile in `.env_local`:**
+```env
+FRAMEWORK_PROFILE=data-migration  # Choose your profile
 ```
 
-## 🚀 Usage Examples
+---
+
+## 🔧 Common Use Cases
+
+### 1. Migrate from Cosmos DB to Atlas
+
+```bash
+# Your Cosmos DB → MongoDB Atlas migration
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
+```
+
+### 2. Generate Test Data
+
+```bash
+# Generate 1M documents for testing
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000000
+```
+
+### 3. Custom Migration Strategy
+
+```bash
+# Use your own migration logic
+python flexible_migrate.py --strategy my_custom_strategy.py
+```
+
+### 4. Index Management
+
+```bash
+# Disable indexes for faster migration
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
+
+# Recreate indexes after migration
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --create-indexes
+```
+
+---
+
+## 📋 Available Commands
 
 ### Data Generation
 
 ```bash
-# Generate documents using framework using python generator
-python flexible_generator.py --source user_defined/generators/volvo_generator.py
+# List available generators
+python flexible_generator.py --list-generators
 
-source venv/bin/activate && FRAMEWORK_PROFILE=dev  python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
+# List JSON templates
+python flexible_generator.py --list-templates
 
+# Generate with Python generator
+python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 1000
 
-# Generate specific amount using json generator
-source venv/bin/activate && FRAMEWORK_PROFILE=dev  python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5
+# Generate with JSON template
+python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 1000
 ```
 
-### Migration
+### Data Migration
 
 ```bash
-# Full migration with checkpoint support
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
+# List available strategies
+python flexible_migrate.py --list-strategies
 
+# Standard migration
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py
 
-# Force start from beginning
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --force-from-start
+# Force restart from beginning
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --force-from-start
 
-# Disable indexes for optimal performance
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
+# Disable indexes for performance
+python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
 ```
 
-### Index Management
+---
 
-```bash
-# Create indexes from source database
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --create-indexes
+## 🏗️ Project Structure
 
-# Disable indexes for optimal performance during migration
-source venv/bin/activate && FRAMEWORK_PROFILE=data-migration python flexible_migrate.py --strategy user_defined/strategies/volvo_strategy.py --disable-indexes
+```
+dataworks/
+├── 📁 framework/              # Core framework
+│   ├── core/                 # Database clients
+│   ├── config/               # Configuration system
+│   ├── generators/           # Data generation
+│   ├── migrations/           # Migration engine
+│   └── monitoring/           # Performance tracking
+├── 📁 user_defined/          # Your custom code
+│   ├── generators/           # Custom generators
+│   ├── strategies/           # Custom strategies
+│   └── templates/           # JSON templates
+├── 🔧 flexible_generator.py   # Data generation script
+├── 🔧 flexible_migrate.py    # Migration script
+└── ⚙️ .env_local             # Your configuration
 ```
 
-## 📈 Monitoring and Progress
+---
 
-### Real-time Progress Bars
+## 🛠️ Configuration
 
-Both scripts provide real-time progress monitoring:
+### Database Connection Strings
 
-- **Document count** and rate (docs/sec)
-- **RU consumption** (for Cosmos DB)
-- **Throttling detection** (red color when throttling)
-- **ETA** and elapsed time
-- **Error counts** and retry statistics
+**Cosmos DB (Source):**
+```env
+GEN_DB_CONNECTION_STRING="mongodb://account:password@account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb"
+```
 
-### Checkpoint System
+**MongoDB Atlas (Target):**
+```env
+MIG_TARGET_DB_CONNECTION_STRING="mongodb+srv://username:password@cluster.mongodb.net/"
+```
 
-The migration automatically saves progress every 50,000 documents:
-- **Resume**: Automatic on restart
-- **No Duplicates**: Smart resume prevents data duplication
+### Performance Tuning
 
-## 🛡️ Error Handling and Recovery
+```env
+# Override profile settings
+MIG_BATCH_SIZE=20000          # Documents per batch
+GEN_BATCH_SIZE=50000          # Generation batch size
+FRAMEWORK_WRITE_WORKERS=16    # Parallel workers
+```
 
-### Automatic Recovery
+---
 
-- **Connection Issues**: Automatic retry with exponential backoff
-- **Throttling**: Intelligent throttling detection and backoff
-- **Network Issues**: Robust error handling with minimal delays
-- **Checkpoint Recovery**: Resume from last successful batch
+## 📈 Monitoring & Progress
+
+DataWorks provides real-time monitoring:
+
+- **📊 Progress bars** with document counts and rates
+- **⚡ Performance metrics** (docs/sec, RU consumption)
+- **🔄 Checkpoint recovery** (resume from interruptions)
+- **📝 Detailed logging** for troubleshooting
+
+---
+
+## 🚨 Troubleshooting
 
 ### Common Issues
 
@@ -267,71 +253,19 @@ The migration automatically saves progress every 50,000 documents:
 - Increase system memory
 - Monitor system resources
 
-## 🔍 Verification
-
-### Document Count Verification
-
-```python
-# Quick verification script
-from pymongo import MongoClient
-import os
-from dotenv import load_dotenv
-
-load_dotenv('.env_local')
-
-# Cosmos DB count
-cosmos_client = MongoClient(os.getenv('GEN_DB_CONNECTION_STRING'))
-cosmos_count = cosmos_client[os.getenv('GEN_DB_NAME')][os.getenv('GEN_DB_COLLECTION')].estimated_document_count()
-
-# Atlas count
-atlas_client = MongoClient(os.getenv('MIG_TARGET_DB_CONNECTION_STRING'))
-atlas_count = atlas_client[os.getenv('MIG_TARGET_DB_NAME')][os.getenv('MIG_TARGET_DB_COLLECTION')].estimated_document_count()
-
-print(f"Cosmos DB: {cosmos_count:,} documents")
-print(f"MongoDB Atlas: {atlas_count:,} documents")
-print(f"Migration Complete: {cosmos_count == atlas_count}")
-```
-
-## 🚨 Important Notes
-
-### Cost Considerations
-- **Cosmos DB RU**: Monitor RU consumption during migration
-- **Atlas Costs**: Ensure appropriate cluster sizing
-- **Network Transfer**: Consider data transfer costs
-
-### Performance Tips
-- **Run during off-peak hours** for better performance
-- **Monitor RU consumption** to avoid throttling
-- **Use appropriate cluster sizes** for your data volume
-- **Test with smaller datasets** before full migration
-
-### Security
-
-- **🔐 Never commit credentials** to version control
-- **📁 Use `.env_local`** for sensitive data (not tracked by git)
-- **🚫 Avoid hardcoded secrets** in scripts
-- **🔄 Rotate credentials** regularly
-- **📋 Use `.env_local.example`** as a template for team members
-- **⚠️ Files with secrets have been removed** from git history for security
-
-## 📞 Support and Troubleshooting
-
-### Logs and Debugging
-- Check console output for real-time progress
-- Monitor RU consumption in Azure portal
-- Verify Atlas cluster metrics
-- Review error messages for specific issues
-
 ### Getting Help
+
 1. **Check logs** for specific error messages
 2. **Verify configuration** in `.env_local`
-3. **Test data generation** with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5`
+3. **Test data generation** with small amounts first
 4. **Review performance metrics** in progress bars
-
-## 📄 License
-
-This project is provided as-is for Volvo service orders migration purposes.
 
 ---
 
-**Ready to migrate?** Start with `python flexible_generator.py --source user_defined/generators/volvo_generator.py --total 5` to test your DataWorks setup! 🚀
+## 📄 License
+
+This project is provided as-is for enterprise data migration purposes.
+
+---
+
+**Ready to migrate?** Start with a small test: `python flexible_generator.py --source user_defined/templates/service_orders/service_order_template.json --total 5` 🚀
