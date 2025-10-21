@@ -221,7 +221,7 @@ class MigrationEngine:
                     # Count documents that have already been migrated (documents with _id <= resume_from)
                     # The resume_from is the last document that was successfully migrated
                     count_query = {"_id": {"$lte": bson.ObjectId(resume_from)}} if bson.ObjectId.is_valid(resume_from) else {}
-                    migrated_so_far = await self.source_client.collection.count_documents(count_query)
+                    migrated_so_far = await self.source_client.collection.estimated_document_count(count_query)
                     logger.info(f"📊 Resuming: Progress bar starting from {migrated_so_far:,} documents (based on resume point)")
                     logger.info(f"📊 Resume point: {resume_from}")
                     logger.info(f"📊 Count query: {count_query}")
@@ -266,6 +266,8 @@ class MigrationEngine:
         # Log the progress bar initialization
         logger.info(f"📊 Progress bar initialized: {migrated_so_far:,}/{total_docs:,} documents ({migrated_so_far/total_docs*100:.1f}%)")
         logger.info(f"📊 Migration strategy documents_migrated set to: {self.migration_strategy.documents_migrated:,}")
+        logger.info(f"📊 Progress bar current value: {pbar.n}")
+        logger.info(f"📊 Progress bar total value: {pbar.total}")
         
         # Store progress bar reference for statistics updates
         self.progress_bar = pbar
@@ -666,10 +668,7 @@ class MigrationEngine:
             
             # ULTRA-FAST real-time progress update (immediate)
             if pbar and stats['migrated'] > 0:
-                # Update migration strategy document count
-                self.migration_strategy.documents_migrated += stats['migrated']
-                
-                # Update progress bar
+                # Update progress bar (migration strategy already updated above)
                 pbar.update(stats['migrated'])
                 self._update_realtime_rate(pbar, stats['migrated'])
                 pbar.refresh()  # Force immediate display update
