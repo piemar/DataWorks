@@ -245,7 +245,7 @@ class MigrationEngine:
             await self._start_write_workers()
             
             # ULTRA-FAST: Start aggressive read-ahead worker (like original migrate_to_atlas.py)
-            await self._start_aggressive_read_worker(resume_from, pbar)
+            await self._start_aggressive_read_worker(resume_from, self.progress_monitor)
             
             # Wait for all workers to complete
             await asyncio.gather(*self.read_tasks, *self.write_tasks, return_exceptions=True)
@@ -345,7 +345,7 @@ class MigrationEngine:
             task = asyncio.create_task(self._write_worker(i))
             self.write_tasks.append(task)
     
-    async def _start_aggressive_read_worker(self, resume_from: Optional[str], pbar):
+    async def _start_aggressive_read_worker(self, resume_from: Optional[str], progress_monitor):
         """ULTRA-FAST aggressive read-ahead worker (like original migrate_to_atlas.py)"""
         try:
             # Build query for resuming
@@ -371,14 +371,14 @@ class MigrationEngine:
             logger.info(f"🚀 Resume from: {resume_from}")
             
             # Start aggressive read-ahead worker
-            read_task = asyncio.create_task(self._aggressive_read_worker(cursor, query, 0, pbar, resume_from))
+            read_task = asyncio.create_task(self._aggressive_read_worker(cursor, query, 0, progress_monitor, resume_from))
             self.read_tasks = [read_task]
             
         except Exception as e:
             logger.error(f"Error starting aggressive read worker: {e}")
             raise
     
-    async def _aggressive_read_worker(self, cursor, query, worker_id: int, pbar, resume_from: Optional[str] = None):
+    async def _aggressive_read_worker(self, cursor, query, worker_id: int, progress_monitor, resume_from: Optional[str] = None):
         """ULTRA-FAST aggressive read-ahead worker with 100ms flush intervals"""
         try:
             batch = []
@@ -432,7 +432,7 @@ class MigrationEngine:
                             "aggressive_flush": True
                         }
                     )
-                    await self.write_queue.put((migration_batch, pbar))
+                    await self.write_queue.put((migration_batch, progress_monitor))
                     batch = []
                     batch_count = 0
                     last_flush_time = current_time
@@ -450,7 +450,7 @@ class MigrationEngine:
                         "final_batch": True
                     }
                 )
-                await self.write_queue.put((migration_batch, pbar))
+                await self.write_queue.put((migration_batch, progress_monitor))
                 
         except Exception as e:
             logger.error(f"Error in aggressive read worker {worker_id}: {e}")
@@ -484,7 +484,7 @@ class MigrationEngine:
                             await self._write_batch_aggregated(batch_buffer, worker_id)
                         break
                     
-                    batch, pbar = batch_data
+                    batch, progress_monitor = batch_data
                     batch_buffer.append(batch)
                     
                     # Process aggregated batches
@@ -495,7 +495,7 @@ class MigrationEngine:
                     )
                     
                     if should_process:
-                        await self._write_batch_aggregated(batch_buffer, worker_id, pbar)
+                        await self._write_batch_aggregated(batch_buffer, worker_id, progress_monitor)
                         batch_buffer = []
                         last_process_time = current_time
                     
@@ -507,7 +507,7 @@ class MigrationEngine:
         except Exception as e:
             logger.error(f"Write worker {worker_id} failed: {e}")
     
-    async def _write_batch_aggregated(self, batches: List[MigrationBatch], worker_id: int, pbar=None):
+    async def _write_batch_aggregated(self, batches: List[MigrationBatch], worker_id: int, progress_monitor=None):
         """ULTRA-FAST aggregated batch migration with direct bulk operations (like original migrate_to_atlas.py)"""
         batch_start_time = time.time()
         stats = {'migrated': 0, 'skipped': 0, 'errors': 0}
@@ -622,18 +622,19 @@ class MigrationEngine:
             docs_per_second = len(all_docs) / batch_time if batch_time > 0 else 0
             
             # ULTRA-FAST real-time progress update (immediate)
-            if pbar and stats['migrated'] > 0:
-                pbar.update(stats['migrated'])
-                self._update_realtime_rate(pbar, stats['migrated'])
-                pbar.refresh()  # Force immediate display update
+            if progress_monitor and stats['migrated'] > 0:
+                # Update progress through the enhanced monitor
+                current_rate = stats['migrated'] / (time.time() - batch_start_time)
+                self._update_progress_statistics(current_rate, stats['migrated'])
             
             logger.debug(f"Worker {worker_id}: ULTRA-FAST aggregated batch completed - {docs_per_second:.0f} docs/s")
             
         except Exception as e:
             logger.error(f"Worker {worker_id}: Failed to migrate batch: {e}")
             self.migration_strategy.errors += 1
-            if pbar:
-                pbar.update(0)  # Update progress even on failure
+            if progress_monitor:
+                # Update progress even on failure
+                self._update_progress_statistics(0, 0)
     
     async def _insert_documents_individually(self, documents: List[Dict], worker_id: int, stats: Dict):
         """Fallback method: Insert documents individually with duplicate handling"""
@@ -767,7 +768,7 @@ class MigrationEngine:
         except Exception as e:
             logger.error(f"Failed to cleanup corrupted checkpoints: {e}")
     
-    def _update_realtime_rate(self, pbar, docs_processed: int):
+    def _update_realtime_rate(self, progress_monitor, docs_processed: int):
         """Update real-time rate calculation for progress bar"""
         try:
             current_time = time.time()
@@ -788,7 +789,8 @@ class MigrationEngine:
                 
                 # Update progress bar description with instant rate
                 instant_rate_str = f"{self.instant_rate:,.0f} docs/s"
-                pbar.set_description(f"🚀 Migrating data | Instant: {instant_rate_str}")
+                if progress_monitor and hasattr(progress_monitor, 'main_pbar') and progress_monitor.main_pbar:
+                    progress_monitor.main_pbar.set_description(f"🚀 Migrating data | Instant: {instant_rate_str}")
                 
                 # Update tracking variables
                 self.last_update_time = current_time
