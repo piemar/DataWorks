@@ -6,7 +6,7 @@
 
 ## 🎯 What is DataWorks?
 
-DataWorks is a professional-grade framework designed for large-scale NoSQL database migrations and data generation. It handles migrations that existing tools simply cannot support.
+DataWorks is a framework designed for large-scale NoSQL database migrations and data generation. It handles migrations that existing tools simply cannot support.
 
 ### 🎯 **Core Capabilities:**
 
